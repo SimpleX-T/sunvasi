@@ -1,4 +1,4 @@
-import type { Content, FunctionCall } from "@google/genai";
+import type { Content, FunctionCall, GenerateContentResponse } from "@google/genai";
 import { getGemini, getGeminiModel } from "@/lib/gemini";
 import { supabaseAdmin } from "@/lib/supabase";
 import type {
@@ -15,6 +15,45 @@ import { resolveMilestoneDisputeOnChain } from "@/lib/tw-actions";
 import { logger } from "@/lib/logger";
 import { ARBITRATOR_VERSION, SUNVASI_ARBITRATOR_SYSTEM_PROMPT } from "./system-prompt";
 import { TOOL_NAMES, arbitratorTools, type ToolName } from "./tools";
+import { callHuggingFace, isHuggingFaceConfigured } from "./llm-hf";
+
+/* ---------------------------------------------------------------------------
+ * LLM dispatch.
+ *
+ *   Hugging Face wins when HUGGING_FACE_TOKEN + HUGGING_FACE_MODEL are set,
+ *   otherwise we fall back to Gemini. The two backends both return
+ *   GenerateContentResponse-shaped objects so the rest of the runner is
+ *   provider-agnostic.
+ *
+ *   Returned shape from callLLM:
+ *     - response.candidates[0].content   → conversation memory
+ *     - response.text                    → assistant prose for streaming
+ *     - response.candidates[0].content.parts[].functionCall  → tool calls
+ * ------------------------------------------------------------------------ */
+
+async function callLLM(args: {
+  history: Content[];
+}): Promise<GenerateContentResponse> {
+  if (isHuggingFaceConfigured()) {
+    return callHuggingFace({
+      history: args.history,
+      tools: arbitratorTools,
+      systemPrompt: SUNVASI_ARBITRATOR_SYSTEM_PROMPT,
+      temperature: 0.2,
+    });
+  }
+  const gemini = getGemini();
+  const model = getGeminiModel();
+  return gemini.models.generateContent({
+    model,
+    contents: args.history,
+    config: {
+      systemInstruction: SUNVASI_ARBITRATOR_SYSTEM_PROMPT,
+      tools: [{ functionDeclarations: arbitratorTools }],
+      temperature: 0.2,
+    },
+  });
+}
 
 /* ---------------------------------------------------------------------------
  * Arbitration orchestration loop.
@@ -107,8 +146,8 @@ export async function* runArbitration(disputeId: string): AsyncGenerator<Arbitra
     },
   };
 
-  const gemini = getGemini();
-  const model = getGeminiModel();
+  // Note: the LLM client + model are resolved per-iteration inside callLLM(),
+  // which decides between Hugging Face and Gemini based on env config.
 
   const history: Content[] = [
     {
@@ -133,17 +172,9 @@ export async function* runArbitration(disputeId: string): AsyncGenerator<Arbitra
 
     let response;
     try {
-      response = await gemini.models.generateContent({
-        model,
-        contents: history,
-        config: {
-          systemInstruction: SUNVASI_ARBITRATOR_SYSTEM_PROMPT,
-          tools: [{ functionDeclarations: arbitratorTools }],
-          temperature: 0.2,
-        },
-      });
+      response = await callLLM({ history });
     } catch (e) {
-      const raw = e instanceof Error ? e.message : "Gemini call failed";
+      const raw = e instanceof Error ? e.message : "LLM call failed";
       const message = formatGeminiError(raw);
       yield { type: "error", data: { message } };
       return;
