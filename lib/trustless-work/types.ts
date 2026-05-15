@@ -48,7 +48,6 @@ export interface FundEscrowInput {
 }
 
 export interface ApproveMilestoneInput {
-  signer: string;
   contractId: string;
   milestoneIndex: string;
   approver: string;

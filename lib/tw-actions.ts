@@ -99,7 +99,9 @@ export async function changeMilestoneStatusOnChain(args: {
   return signAndBroadcast(init.unsignedTransaction, args.signer);
 }
 
-/** Approve a milestone. Signed by the approver (client). */
+/** Approve a milestone. Signed by the approver (client). TW's approve
+ * payload takes `approver` only — passing a `signer` field is rejected
+ * with "signer: property should not exist". */
 export async function approveMilestoneOnChain(args: {
   escrowContractId: string;
   milestoneIndex: number;
@@ -107,7 +109,6 @@ export async function approveMilestoneOnChain(args: {
 }): Promise<OnChainResult> {
   const tw = getTrustlessWork();
   const init = await tw.approveMilestone({
-    signer: args.signer.address,
     contractId: args.escrowContractId,
     milestoneIndex: String(args.milestoneIndex),
     approver: args.signer.address,
