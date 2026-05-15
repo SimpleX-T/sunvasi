@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Check, ChevronDown, FileText, Link2, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
+import { SubmitDeliverableDialog } from "@/components/contract/submit-deliverable-dialog";
 import { formatUsdc, relativeTime } from "@/lib/utils";
 import type { MilestoneRow, DeliverableFile, DeliverableLink } from "@/lib/supabase";
 
@@ -24,6 +25,7 @@ export function MilestoneCard({
 }) {
   const [expanded, setExpanded] = useState(milestone.status !== "released" && milestone.status !== "approved");
   const [submitting, setSubmitting] = useState(false);
+  const [submitOpen, setSubmitOpen] = useState(false);
   const router = useRouter();
 
   const files = (milestone.deliverable_files ?? []) as DeliverableFile[];
@@ -31,24 +33,6 @@ export function MilestoneCard({
 
   const canSubmit = role === "freelancer" && milestone.status === "in_progress";
   const canReview = role === "client" && milestone.status === "submitted";
-
-  async function quickSubmit(note: string) {
-    setSubmitting(true);
-    try {
-      const res = await fetch(`/api/milestones/${milestone.id}/submit`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files: [], links: [], note }),
-      });
-      if (!res.ok) throw new Error("submit_failed");
-      toast.success("Milestone submitted. Client has been notified.");
-      router.refresh();
-    } catch {
-      toast.error("Could not submit.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
 
   async function approve() {
     setSubmitting(true);
@@ -167,9 +151,9 @@ export function MilestoneCard({
               <Button
                 variant="primary"
                 size="sm"
-                onClick={() => quickSubmit("Submitting milestone.")}
+                onClick={() => setSubmitOpen(true)}
                 disabled={submitting}
-                leftIcon={submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                leftIcon={<Upload className="h-4 w-4" />}
               >
                 Submit deliverable
               </Button>
@@ -209,6 +193,14 @@ export function MilestoneCard({
           ) : null}
         </div>
       ) : null}
+
+      <SubmitDeliverableDialog
+        open={submitOpen}
+        onOpenChange={setSubmitOpen}
+        contractId={milestone.contract_id}
+        milestoneId={milestone.id}
+        milestoneTitle={milestone.title}
+      />
     </article>
   );
 }

@@ -36,8 +36,18 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     return NextResponse.json({ error: "forbidden" }, { status: 403 });
   }
 
+  // Demo override: when SUNVASI_DEMO_AUTO_RELEASE_SECONDS is set, every
+  // newly-submitted milestone auto-releases after that many SECONDS instead
+  // of the contract's days-level setting. Letting us shoot a video without
+  // waiting 7 days for the countdown to elapse.
   const now = new Date();
-  const autoReleaseAt = new Date(now.getTime() + (contract.auto_release_days ?? 7) * 24 * 3600 * 1000);
+  const demoSeconds = Number(process.env.SUNVASI_DEMO_AUTO_RELEASE_SECONDS);
+  const autoReleaseAt =
+    demoSeconds > 0
+      ? new Date(now.getTime() + demoSeconds * 1000)
+      : new Date(
+          now.getTime() + (contract.auto_release_days ?? 7) * 24 * 3600 * 1000,
+        );
 
   const { data: updated, error } = await db
     .from("milestones")
