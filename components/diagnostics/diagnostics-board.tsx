@@ -177,10 +177,13 @@ function ReprovisionPanel() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ReprovisionResult | null>(null);
 
-  async function run() {
+  async function run(force: boolean) {
     setBusy(true);
     try {
-      const res = await authed("/api/diagnostics/reprovision", { method: "POST" });
+      const path = force
+        ? "/api/diagnostics/reprovision?force=1"
+        : "/api/diagnostics/reprovision";
+      const res = await authed(path, { method: "POST" });
       setResult((await res.json()) as ReprovisionResult);
     } catch (e) {
       setResult({
@@ -204,20 +207,32 @@ function ReprovisionPanel() {
           <p className="mt-1 text-body-sm text-fg-muted max-w-[68ch]">
             Forces a fresh run of the wallet pipeline for the signed-in user:
             (1) ensure a Privy Stellar wallet exists, (2) activate it on-chain
-            via Friendbot, (3) establish the USDC trustline. Use this if
-            funding fails with &ldquo;wallet does not have USDC asset&rdquo; —
-            it surfaces exactly which step failed instead of silent retries.
+            via Friendbot, (3) establish the USDC trustline. Use{" "}
+            <strong className="text-fg">Force re-provision</strong> if you&apos;re
+            hitting 401s on raw_sign — that wipes any stranded owner-bound
+            wallet and creates a fresh app-owned one.
           </p>
         </div>
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={run}
-          disabled={busy}
-          leftIcon={busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wallet className="h-3.5 w-3.5" />}
-        >
-          Re-provision
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => run(false)}
+            disabled={busy}
+            leftIcon={busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wallet className="h-3.5 w-3.5" />}
+          >
+            Re-provision
+          </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => run(true)}
+            disabled={busy}
+            leftIcon={busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wallet className="h-3.5 w-3.5" />}
+          >
+            Force re-provision
+          </Button>
+        </div>
       </header>
 
       {result ? (

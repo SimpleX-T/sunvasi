@@ -56,7 +56,7 @@ async function ensureWalletForProfile(profile: ProfileRow): Promise<ProfileRow> 
   let address = profile.payout_address;
   if (!walletId || !address) {
     try {
-      const wallet = await ensureStellarWallet(profile.id);
+      const wallet = await ensureStellarWallet(profile.id, profile.stellar_wallet_id);
       if (!wallet?.id || !wallet?.address) return profile;
       walletId = wallet.id;
       address = wallet.address;

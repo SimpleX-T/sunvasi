@@ -113,13 +113,19 @@ export async function getVerifiedEmailsForUser(userId: string): Promise<string[]
   return Array.from(new Set(emails));
 }
 
-/** Create a Stellar-chain embedded wallet owned by `userId` (Privy DID). */
+/** Create an APP-OWNED Stellar wallet for `userId`. We intentionally do NOT
+ * set `owner.user_id`: an owner-bound wallet requires the user's session
+ * signer (or a separately-configured authorization key) to call raw_sign,
+ * which surfaces as a 401 on every server-initiated signing operation.
+ * Sunvasi's whole UX promise is that the server acts on behalf of users
+ * autonomously, so app-owned is the right model — security comes from the
+ * app secret, and the userId is preserved as a display_name for traceability
+ * + maintained as a foreign key in `profiles.stellar_wallet_id`. */
 export async function createStellarWallet(userId: string): Promise<PrivyWallet> {
   logger.info("privy.wallet.create", { userId, chain: "stellar" });
   return request<PrivyWallet>("/wallets", "POST", {
     chain_type: "stellar",
-    owner: { user_id: userId },
-    display_name: "Sunvasi payout wallet",
+    display_name: `Sunvasi · ${userId.replace(/^did:privy:/, "").slice(0, 16)}`,
   });
 }
 
@@ -148,19 +154,27 @@ export async function rawSignHash(walletId: string, hashHex: string): Promise<st
   return sig.startsWith("0x") ? sig.slice(2) : sig;
 }
 
-/** Idempotently ensure a Stellar wallet exists for a user. Returns the wallet
- * record (creating one if absent). Safe to call on every sign-in. */
-export async function ensureStellarWallet(userId: string): Promise<PrivyWallet> {
-  try {
-    const existing = await listUserWallets(userId);
-    const stellar = existing.data?.find((w) => w.chain_type === "stellar");
-    if (stellar) return stellar;
-  } catch (e) {
-    // listing failure shouldn't block creation
-    logger.warn("privy.list_user_wallets_failed", {
-      userId,
-      message: e instanceof Error ? e.message : String(e),
-    });
+/** Idempotently ensure a Stellar wallet exists. With app-owned wallets the
+ * Privy-side user→wallet linkage no longer exists, so callers should pass
+ * the wallet ID they already have stored in `profiles.stellar_wallet_id`.
+ * When `existingWalletId` is provided we verify it's still live; otherwise
+ * we create a fresh app-owned wallet. */
+export async function ensureStellarWallet(
+  userId: string,
+  existingWalletId?: string | null,
+): Promise<PrivyWallet> {
+  if (existingWalletId) {
+    try {
+      const w = await getWallet(existingWalletId);
+      if (w?.chain_type === "stellar") return w;
+    } catch (e) {
+      // Wallet was deleted, ID is stale, or auth has changed — fall through
+      // and provision a fresh one.
+      logger.warn("privy.wallet.get_failed_recreating", {
+        walletId: existingWalletId,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
   return createStellarWallet(userId);
 }

@@ -36,13 +36,20 @@ export async function POST(req: Request) {
     );
   }
 
+  // ?force=1 wipes the stored wallet ID even if the address looks Stellar.
+  // Needed when the existing wallet was created with `owner: { user_id: … }`
+  // and now returns 401 on raw_sign because Privy expects an authorization
+  // signature we can't easily produce. Force re-provision creates a fresh
+  // app-owned wallet that we CAN sign with via Basic auth alone.
+  const force = new URL(req.url).searchParams.get("force") === "1";
+
   const steps: StepResult[] = [];
   const db = supabaseAdmin();
 
-  // Step 1 — null out any bad payout_address before re-provisioning so
-  // ensureStellarWallet creates a new wallet if the existing one isn't
-  // Stellar (EVM 0x leak from a previous bug).
+  // Step 1 — clean up the existing wallet binding. Always nuke when ?force=1;
+  // otherwise only nuke if the address isn't a valid Stellar G... key.
   let profile: ProfileRow | null = null;
+  let priorWalletId: string | null = null;
   try {
     const { data } = await db
       .from("profiles")
@@ -50,16 +57,21 @@ export async function POST(req: Request) {
       .eq("id", auth.did)
       .maybeSingle<ProfileRow>();
     profile = data;
+    priorWalletId = data?.stellar_wallet_id ?? null;
     const oldAddress = data?.payout_address ?? "";
-    if (oldAddress && !STELLAR_ADDR_RE.test(oldAddress)) {
+    const shouldClear =
+      force || (oldAddress.length > 0 && !STELLAR_ADDR_RE.test(oldAddress));
+    if (shouldClear && (oldAddress || priorWalletId)) {
       await db
         .from("profiles")
         .update({ payout_address: null, stellar_wallet_id: null })
         .eq("id", auth.did);
       steps.push({
-        name: "clear_bad_address",
+        name: "clear_existing_wallet",
         ok: true,
-        detail: `Cleared non-Stellar payout_address (${oldAddress.slice(0, 10)}…)`,
+        detail: force
+          ? `Force-cleared wallet binding (was ${oldAddress.slice(0, 10)}…). A fresh app-owned wallet will be created.`
+          : `Cleared non-Stellar payout_address (${oldAddress.slice(0, 10)}…)`,
       });
     }
   } catch (e) {
@@ -70,11 +82,12 @@ export async function POST(req: Request) {
     });
   }
 
-  // Step 2 — ensure Privy Stellar wallet exists.
+  // Step 2 — ensure Privy Stellar wallet exists. Force mode discards any
+  // existing wallet ID so a fresh one is created.
   let walletId: string | undefined;
   let address: string | undefined;
   try {
-    const wallet = await ensureStellarWallet(auth.did);
+    const wallet = await ensureStellarWallet(auth.did, force ? null : priorWalletId);
     walletId = wallet.id;
     address = wallet.address;
     await db
