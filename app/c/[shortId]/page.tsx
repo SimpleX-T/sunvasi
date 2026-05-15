@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Eye, Lock, ShieldCheck } from "lucide-react";
+import { Lock, ShieldCheck } from "lucide-react";
 import { Wordmark } from "@/components/marketing/wordmark";
-import { getCurrentProfile } from "@/lib/auth";
+import { FundAction } from "@/components/contract/fund-action";
 import { supabaseAdmin, type ContractRow, type MilestoneRow } from "@/lib/supabase";
 import { formatUsdc } from "@/lib/utils";
-import { FundContractCard } from "./fund-card";
 
 interface Props {
   params: Promise<{ shortId: string }>;
@@ -46,16 +45,6 @@ export default async function PublicContractPage({ params }: Props) {
   if (!contract) notFound();
 
   const isFunded = contract.status !== "awaiting_funding" && contract.status !== "draft";
-
-  // Figure out who's looking. Only the named client gets the fund button —
-  // invitees and randoms see a view-only state with a clear note.
-  const profile = await getCurrentProfile().catch(() => null);
-  const viewerEmail = profile?.email?.toLowerCase();
-  const clientEmail = contract.client_email?.toLowerCase();
-  const inviteeEmails = (contract.invitee_emails ?? []).map((e) => e.toLowerCase());
-  const isClient = !!viewerEmail && !!clientEmail && viewerEmail === clientEmail;
-  const isInvitee = !!viewerEmail && inviteeEmails.includes(viewerEmail);
-  const isFreelancer = !!profile?.id && profile.id === contract.freelancer_id;
 
   return (
     <div className="min-h-svh">
@@ -158,53 +147,16 @@ export default async function PublicContractPage({ params }: Props) {
       </main>
 
       {!isFunded ? (
-        isClient || (!viewerEmail && !contract.client_email) ? (
-          <FundContractCard
-            contractId={contract.id}
-            shortId={contract.short_id}
-            total={Number(contract.total_amount_usdc)}
-            visibility={contract.visibility}
-          />
-        ) : (
-          <ViewOnlyCard
-            clientEmail={contract.client_email}
-            role={isFreelancer ? "freelancer" : isInvitee ? "invitee" : "viewer"}
-          />
-        )
+        <FundAction
+          contractId={contract.id}
+          shortId={contract.short_id}
+          total={Number(contract.total_amount_usdc)}
+          clientEmail={contract.client_email}
+          freelancerId={contract.freelancer_id}
+          visibility={contract.visibility}
+          layout="sticky-bottom"
+        />
       ) : null}
-    </div>
-  );
-}
-
-function ViewOnlyCard({
-  clientEmail,
-  role,
-}: {
-  clientEmail: string | null;
-  role: "freelancer" | "invitee" | "viewer";
-}) {
-  const message =
-    role === "freelancer"
-      ? "You created this contract. Funding waits on your client."
-      : role === "invitee"
-        ? "You have view access to this contract. Only the named client can fund it."
-        : "Anyone with this link can read the contract, but only the named client can fund it.";
-  return (
-    <div className="fixed bottom-0 inset-x-0 z-30 border-t border-border bg-bg-elevated/95 backdrop-blur-md">
-      <div className="mx-auto max-w-[1100px] px-6 lg:px-10 py-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-start gap-3 text-body-sm">
-          <Eye className="h-4 w-4 mt-0.5 text-fg-subtle shrink-0" />
-          <div className="space-y-1">
-            <p className="text-fg">{message}</p>
-            {clientEmail ? (
-              <p className="text-fg-subtle">
-                Client:{" "}
-                <code className="font-mono text-fg">{clientEmail}</code>
-              </p>
-            ) : null}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

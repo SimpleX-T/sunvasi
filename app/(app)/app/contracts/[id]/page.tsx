@@ -7,6 +7,7 @@ import { Badge, StatusBadge } from "@/components/ui/badge";
 import { MilestoneCard, type ViewerRole } from "@/components/contract/milestone-card";
 import { ActivityTimeline } from "@/components/contract/activity-timeline";
 import { ContractActions } from "@/components/contract/contract-actions";
+import { FundAction } from "@/components/contract/fund-action";
 import { getCurrentProfile, getCurrentUser } from "@/lib/auth";
 import {
   supabaseAdmin,
@@ -167,6 +168,21 @@ export default async function ContractDetailPage({ params }: Props) {
             </Link>
           </aside>
         </header>
+
+        {/* Unfunded contract → render the funding action prominently. The
+            FundAction component handles all role detection client-side so
+            the freelancer / invitees see a view-only state automatically. */}
+        {contract.status === "awaiting_funding" || contract.status === "draft" ? (
+          <FundAction
+            contractId={contract.id}
+            shortId={contract.short_id}
+            total={Number(contract.total_amount_usdc)}
+            clientEmail={contract.client_email}
+            freelancerId={contract.freelancer_id}
+            visibility={contract.visibility}
+            layout="inline"
+          />
+        ) : null}
 
         <div className="grid lg:grid-cols-[1fr_320px] gap-10">
           <section className="space-y-4">
