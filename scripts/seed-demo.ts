@@ -157,11 +157,14 @@ async function main() {
   if (!disputed) throw new Error("Disputed milestone not found");
 
   console.log("• Inserting dispute & evidence…");
-  await db.from("disputes").insert({
-    milestone_id: disputed.id,
-    contract_id: contractId,
-    filed_by: DEMO_CLIENT_DID,
-    status: "evidence_collection",
+  const { data: disputeRow, error: dErr } = await db
+    .from("disputes")
+    .insert({
+      milestone_id: disputed.id,
+      contract_id: contractId,
+      filed_by: DEMO_CLIENT_DID,
+      status: "resolved",
+      resolved_at: daysAgo(0),
     client_evidence: {
       promised:
         "Deployed at helix.com via Vercel. Lighthouse Performance score >= 90 on mobile. Responsive on 375px and 1440px. CMS hooked up to existing Contentful space.",
@@ -171,13 +174,74 @@ async function main() {
         "Two of four acceptance criteria are not met: (1) site lives on a preview domain, not helix.com; (2) Lighthouse mobile score is below 90.",
       files: [],
     },
-    freelancer_evidence: {
-      delivered:
-        "The site is fully built, responsive, and CMS-integrated. Lighthouse 87 is within typical noise of the 90 target; I've identified the LCP issue and can push the fix in <2 hours. The helix.com DNS swap is blocked on the client's IT team — I cannot deploy to a domain I don't control.",
-      rebuttal:
-        "Lighthouse score is a known browser-noise metric; 87 vs 90 is within margin and is a fixable last-mile detail. The domain swap requires client-side DNS access I was never given.",
-      files: [],
-    },
+      freelancer_evidence: {
+        delivered:
+          "The site is fully built, responsive, and CMS-integrated. Lighthouse 87 is within typical noise of the 90 target; I've identified the LCP issue and can push the fix in <2 hours. The helix.com DNS swap is blocked on the client's IT team — I cannot deploy to a domain I don't control.",
+        rebuttal:
+          "Lighthouse score is a known browser-noise metric; 87 vs 90 is within margin and is a fixable last-mile detail. The domain swap requires client-side DNS access I was never given.",
+        files: [],
+      },
+    })
+    .select()
+    .single();
+  if (dErr || !disputeRow) {
+    console.error("Dispute insert failed:", dErr?.message);
+    process.exit(1);
+  }
+  const disputeId = (disputeRow as { id: string }).id;
+
+  console.log("• Inserting pre-recorded verdict…");
+  await db.from("verdicts").insert({
+    dispute_id: disputeId,
+    release_percentage: 75,
+    party_favored: "split",
+    confidence: "medium",
+    reasoning:
+      "Two of four acceptance criteria are clearly met: the site is built, responsive across the requested viewports, and the Contentful CMS is integrated. The remaining two are partially met: (1) Deployment is live but on a preview subdomain rather than helix.com — the freelancer's claim that the DNS swap is blocked on the client's IT side is consistent with the evidence and is a fixable last-mile detail. (2) Lighthouse Performance is 87 vs the contractual 90; this is within typical run-to-run noise on mobile but technically misses the bar.\n\nThe freelancer has demonstrated good-faith delivery of the bulk of the milestone. Both prior milestones on this contract were approved on time, which earns a measured benefit of the doubt. The 87 → 90 fix and the DNS swap are short, well-scoped follow-ups that don't justify withholding the full payment.\n\nVerdict: release 75% to the freelancer (USDC 600.00), refund 25% to the client (USDC 200.00) — the refund covers the remaining work the freelancer commits to delivering at no additional cost (LCP fix + DNS swap once the client provides access).",
+    tool_call_log: [
+      {
+        ts: daysAgo(0),
+        name: "get_contract_details",
+        args: { contract_id: contractId },
+        result_summary: 'Contract "Marketing site redesign for Helix Software" — 3 milestone(s), $2000 total.',
+      },
+      {
+        ts: daysAgo(0),
+        name: "get_milestone_history",
+        args: { contract_id: contractId },
+        result_summary: "2 prior milestone(s) approved; current dispute on position 3.",
+      },
+      {
+        ts: daysAgo(0),
+        name: "get_evidence",
+        args: { party: "client" },
+        result_summary: "Returned client evidence (4 field(s)).",
+      },
+      {
+        ts: daysAgo(0),
+        name: "get_evidence",
+        args: { party: "freelancer" },
+        result_summary: "Returned freelancer evidence (3 field(s)).",
+      },
+      {
+        ts: daysAgo(0),
+        name: "get_deliverable_files",
+        args: { milestone_id: disputed.id },
+        result_summary: "0 file(s), 2 link(s) submitted for the disputed milestone.",
+      },
+      {
+        ts: daysAgo(0),
+        name: "submit_verdict",
+        args: {
+          release_percentage: 75,
+          party_favored: "split",
+          confidence: "medium",
+        },
+        result_summary: "Verdict submitted: 75% to freelancer, confidence=medium.",
+      },
+    ],
+    arbitrator_version: "sunvasi-arbitrator/2026-05-15.1",
+    verdict_hash: "demo-replay-verdict",
   });
 
   console.log("• Inserting activity log…");
@@ -190,6 +254,13 @@ async function main() {
     { contract_id: contractId, actor_id: DEMO_CLIENT_DID, type: "approved", metadata: { milestone_position: 1 }, created_at: daysAgo(8) },
     { contract_id: contractId, actor_id: DEMO_FREELANCER_DID, type: "submitted", metadata: { milestone_position: 2 }, created_at: daysAgo(2) },
     { contract_id: contractId, actor_id: DEMO_CLIENT_DID, type: "disputed", metadata: { milestone_position: 2 }, created_at: daysAgo(0) },
+    {
+      contract_id: contractId,
+      actor_id: null,
+      type: "verdict",
+      metadata: { release_percentage: 75, party_favored: "split", confidence: "medium" },
+      created_at: daysAgo(0),
+    },
   ]);
 
   console.log("\n✓ Demo seeded.");

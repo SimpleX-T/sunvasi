@@ -10,7 +10,9 @@ import type {
   ToolCallLogEntry,
   VerdictRow,
 } from "@/lib/supabase";
-import { getTrustlessWork } from "@/lib/trustless-work";
+import { isTrustlessWorkConfigured } from "@/lib/trustless-work";
+import { resolveMilestoneDisputeOnChain } from "@/lib/tw-actions";
+import { logger } from "@/lib/logger";
 import { ARBITRATOR_VERSION, SUNVASI_ARBITRATOR_SYSTEM_PROMPT } from "./system-prompt";
 import { TOOL_NAMES, arbitratorTools, type ToolName } from "./tools";
 
@@ -141,10 +143,9 @@ export async function* runArbitration(disputeId: string): AsyncGenerator<Arbitra
         },
       });
     } catch (e) {
-      yield {
-        type: "error",
-        data: { message: e instanceof Error ? e.message : "Gemini call failed" },
-      };
+      const raw = e instanceof Error ? e.message : "Gemini call failed";
+      const message = formatGeminiError(raw);
+      yield { type: "error", data: { message } };
       return;
     }
 
@@ -464,19 +465,96 @@ async function tryResolveOnChain(args: {
   milestone: MilestoneRow;
   releasePercentage: number;
 }): Promise<{ hash?: string | null } | null> {
-  if (!args.contract.escrow_id || args.milestone.tw_milestone_index === null) return null;
-  try {
-    const tw = getTrustlessWork();
-    void tw;
-    // NOTE: actual on-chain resolution requires a signer for the disputeResolver
-    // role (a Sunvasi-controlled wallet). For the demo we surface the broadcast
-    // event but defer the signature step to the caller (server-side signer
-    // wallet, configured in env, signs the unsigned XDR and broadcasts via
-    // /helper/send-transaction).
-    return { hash: null };
-  } catch {
+  if (
+    !args.contract.escrow_id ||
+    String(args.contract.escrow_id).startsWith("mock_") ||
+    !isTrustlessWorkConfigured()
+  ) {
     return null;
   }
+  // The disputeResolver wallet for this escrow. In Sunvasi's current setup
+  // it's the client's wallet (set at escrow init). For production we want a
+  // Sunvasi-controlled wallet to remove client conflict-of-interest.
+  // Configurable via SUNVASI_DISPUTE_RESOLVER_WALLET_ID + ADDRESS.
+  const resolverWalletId =
+    process.env.SUNVASI_DISPUTE_RESOLVER_WALLET_ID ?? "";
+  const resolverAddress =
+    process.env.SUNVASI_DISPUTE_RESOLVER_ADDRESS ?? "";
+
+  // Fallback: look up the client's wallet from profiles (they're the
+  // disputeResolver in the current escrow init flow).
+  const supabase = supabaseAdmin();
+  let walletId = resolverWalletId;
+  let address = resolverAddress;
+  if (!walletId || !address) {
+    if (!args.contract.client_id) return null;
+    const { data: client } = await supabase
+      .from("profiles")
+      .select("stellar_wallet_id, payout_address")
+      .eq("id", args.contract.client_id)
+      .maybeSingle();
+    const cl = client as { stellar_wallet_id: string | null; payout_address: string | null } | null;
+    if (!cl?.stellar_wallet_id || !cl?.payout_address) return null;
+    walletId = cl.stellar_wallet_id;
+    address = cl.payout_address;
+  }
+
+  // Compute distributions: release_percentage of the milestone amount goes to
+  // the freelancer (receiver); the rest refunds to the client (approver).
+  const { data: freelancer } = await supabase
+    .from("profiles")
+    .select("payout_address")
+    .eq("id", args.contract.freelancer_id ?? "")
+    .maybeSingle();
+  const freelancerAddress = (freelancer as { payout_address: string | null } | null)?.payout_address;
+  const { data: clientRow } = await supabase
+    .from("profiles")
+    .select("payout_address")
+    .eq("id", args.contract.client_id ?? "")
+    .maybeSingle();
+  const clientAddress = (clientRow as { payout_address: string | null } | null)?.payout_address;
+  if (!freelancerAddress || !clientAddress) return null;
+
+  const amount = Number(args.milestone.amount_usdc);
+  const toFreelancer = Math.round((amount * args.releasePercentage) / 100 * 100) / 100;
+  const toClient = Math.round((amount - toFreelancer) * 100) / 100;
+  const distributions = [
+    { address: freelancerAddress, amount: toFreelancer },
+    { address: clientAddress, amount: toClient },
+  ].filter((d) => d.amount > 0);
+
+  const milestoneIndex = args.milestone.tw_milestone_index ?? args.milestone.position;
+  try {
+    const result = await resolveMilestoneDisputeOnChain({
+      escrowContractId: args.contract.escrow_id,
+      milestoneIndex,
+      distributions,
+      signer: { walletId, address },
+    });
+    return { hash: result.tx_hash };
+  } catch (e) {
+    logger.warn("arbitrator.on_chain_resolution_failed", {
+      contract_id: args.contract.id,
+      message: e instanceof Error ? e.message : String(e),
+    });
+    return null;
+  }
+}
+
+/** Turn raw Gemini error strings into something the UI can show without
+ * leaking implementation details. The 429 case is the one that bites people
+ * on the free tier, so we surface a clear retry message. */
+function formatGeminiError(raw: string): string {
+  const has429 = /429|RESOURCE_EXHAUSTED|quota/i.test(raw);
+  if (has429) {
+    const retryMatch = raw.match(/retry.*?(\d+)\s*s/i);
+    const retry = retryMatch ? `${retryMatch[1]}s` : "shortly";
+    return `Gemini rate limit reached (free tier: 20 requests/day). The arbitrator can't continue right now — please retry in ${retry}, or upgrade your Gemini plan / switch GEMINI_MODEL to a less-quota-constrained variant.`;
+  }
+  if (/timeout|ETIMEDOUT|fetch failed/i.test(raw)) {
+    return `Couldn't reach Gemini (${raw}). Check your network and GEMINI_API_KEY.`;
+  }
+  return `Arbitration paused — Gemini error: ${raw.slice(0, 240)}`;
 }
 
 async function sha256Hex(input: string): Promise<string> {

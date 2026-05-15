@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { usePrivy } from "@privy-io/react-auth";
 import { useEffect } from "react";
-import { Mail, ShieldCheck } from "lucide-react";
+import { Loader2, Mail, ShieldCheck } from "lucide-react";
 
 const PRIVY_CONFIGURED = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 
@@ -13,6 +13,18 @@ function PrivyAwareSignInButton({ onAuthed }: { onAuthed: () => void }) {
   useEffect(() => {
     if (privy.authenticated) onAuthed();
   }, [privy.authenticated, onAuthed]);
+
+  // If we know the user is already signed in, surface that instead of the
+  // (useless) "Continue with email" button — the redirect fires from the
+  // useEffect above so this is only on-screen for a beat.
+  if (privy.ready && privy.authenticated) {
+    return (
+      <div className="w-full inline-flex items-center justify-center gap-2 rounded border border-border bg-bg-elevated px-5 py-3 text-body-sm text-fg-muted">
+        <Loader2 className="h-4 w-4 animate-spin text-accent" />
+        Already signed in — taking you to the app…
+      </div>
+    );
+  }
   return (
     <button
       type="button"

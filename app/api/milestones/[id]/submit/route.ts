@@ -1,7 +1,21 @@
 import { NextResponse } from "next/server";
 import { readUserFromHeaders } from "@/lib/privy";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin, type ProfileRow } from "@/lib/supabase";
 import { SubmitDeliverableSchema } from "@/lib/contract-schema";
+import { changeMilestoneStatusOnChain, tryOnChain } from "@/lib/tw-actions";
+import { isTrustlessWorkConfigured } from "@/lib/trustless-work";
+import { logger } from "@/lib/logger";
+
+/* ---------------------------------------------------------------------------
+ * Milestone submit (by the freelancer).
+ *
+ *   1. Persist deliverable files / links / note.
+ *   2. Set milestone status → 'submitted' + auto_release_at.
+ *   3. If the contract is on-chain (TW key set + escrow_id present + not mock),
+ *      call TW changeMilestoneStatus("done") signed by the freelancer's
+ *      Privy Stellar wallet. Best-effort: chain failure logs a warning but
+ *      doesn't block the submission.
+ * ------------------------------------------------------------------------ */
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const user = readUserFromHeaders(req.headers);
@@ -48,5 +62,57 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     metadata: { milestone_position: (milestone as { position: number }).position },
   });
 
-  return NextResponse.json({ milestone: updated });
+  // Best-effort on-chain status update — only when the escrow is real.
+  const isMock =
+    !isTrustlessWorkConfigured() ||
+    !contract.escrow_id ||
+    String(contract.escrow_id).startsWith("mock_");
+  let onChain: { ok: boolean; tx_hash?: string | null; error?: string | null } = {
+    ok: false,
+  };
+  if (!isMock) {
+    const { data: freelancer } = await db
+      .from("profiles")
+      .select("stellar_wallet_id, payout_address")
+      .eq("id", user.did)
+      .maybeSingle();
+    const fl = freelancer as Pick<ProfileRow, "stellar_wallet_id" | "payout_address"> | null;
+    if (fl?.stellar_wallet_id && fl?.payout_address) {
+      const result = await tryOnChain("milestone.changeStatus", () =>
+        changeMilestoneStatusOnChain({
+          escrowContractId: contract.escrow_id,
+          milestoneIndex:
+            (milestone as { tw_milestone_index: number | null; position: number })
+              .tw_milestone_index ??
+            (milestone as { position: number }).position,
+          newStatus: "done",
+          signer: { walletId: fl.stellar_wallet_id!, address: fl.payout_address! },
+        }),
+      );
+      onChain = {
+        ok: result.ok,
+        tx_hash: result.result?.tx_hash ?? null,
+        error: result.error,
+      };
+      if (result.ok && result.result?.tx_hash) {
+        await db.from("activity").insert({
+          contract_id: contract.id,
+          milestone_id: id,
+          actor_id: user.did,
+          type: "submitted",
+          metadata: {
+            on_chain: true,
+            tx_hash: result.result.tx_hash,
+          },
+        });
+      }
+    } else {
+      logger.warn("milestone.submit.no_freelancer_wallet", {
+        milestone_id: id,
+        did: user.did,
+      });
+    }
+  }
+
+  return NextResponse.json({ milestone: updated, on_chain: onChain });
 }

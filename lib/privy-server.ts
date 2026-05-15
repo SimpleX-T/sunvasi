@@ -86,6 +86,33 @@ export function isPrivyServerConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID && process.env.PRIVY_APP_SECRET);
 }
 
+interface PrivyUserResponse {
+  id: string;
+  linked_accounts?: Array<{
+    type?: string;
+    address?: string;
+    email?: string;
+  }>;
+}
+
+/** Fetch the user's verified email accounts directly from Privy. Returns the
+ * lowercased email strings linked to the user. We trust ONLY these for any
+ * access check involving the user's email — never the request body. */
+export async function getVerifiedEmailsForUser(userId: string): Promise<string[]> {
+  const user = await request<PrivyUserResponse>(`/users/${userId}`, "GET");
+  const linked = user.linked_accounts ?? [];
+  const emails: string[] = [];
+  for (const acct of linked) {
+    if (acct?.type === "email" && acct.address) {
+      emails.push(acct.address.toLowerCase());
+    }
+    if (acct?.type === "google_oauth" && acct.email) {
+      emails.push(acct.email.toLowerCase());
+    }
+  }
+  return Array.from(new Set(emails));
+}
+
 /** Create a Stellar-chain embedded wallet owned by `userId` (Privy DID). */
 export async function createStellarWallet(userId: string): Promise<PrivyWallet> {
   logger.info("privy.wallet.create", { userId, chain: "stellar" });

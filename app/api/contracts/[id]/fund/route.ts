@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
-import { readUserFromHeaders } from "@/lib/privy";
+import { verifyUserFromHeaders } from "@/lib/privy";
 import { supabaseAdmin, type ContractRow, type MilestoneRow, type ProfileRow } from "@/lib/supabase";
 import { logger } from "@/lib/logger";
 import { getTrustlessWork, isTrustlessWorkConfigured } from "@/lib/trustless-work";
 import {
   ensureStellarWallet,
+  getVerifiedEmailsForUser,
   isPrivyServerConfigured,
   rawSignHash,
 } from "@/lib/privy-server";
@@ -36,13 +36,10 @@ import { USDC_ISSUERS, getNetwork, isStellarAddress } from "@/lib/stellar";
  *   Restricted-visibility access check applies in every mode.
  * ------------------------------------------------------------------------ */
 
-const Body = z.object({
-  email: z.string().email().optional(),
-});
-
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const user = readUserFromHeaders(req.headers);
+  const auth = await verifyUserFromHeaders(req.headers);
+  const user = auth ? { did: auth.did } : null;
   const db = supabaseAdmin();
 
   const { data: contract } = await db
@@ -52,26 +49,36 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     .maybeSingle<ContractRow>();
   if (!contract) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const parsed = Body.safeParse(await req.json().catch(() => ({})));
-  const callerEmail = parsed.success ? parsed.data.email?.toLowerCase() : undefined;
-
   // ── Access check for restricted contracts ──────────────────────────────
+  // The caller's email comes from Privy's verified linked accounts, never
+  // from the request body. This prevents a client from passing an arbitrary
+  // email to bypass the invite list.
+  let verifiedEmails: string[] = [];
   if (contract.visibility === "restricted") {
-    if (!user) {
+    if (!auth) {
       return NextResponse.json(
         { error: "unauthenticated", message: "This contract is restricted — sign in to fund." },
         { status: 401 },
       );
     }
+    try {
+      verifiedEmails = await getVerifiedEmailsForUser(auth.did);
+    } catch (e) {
+      logger.warn("fund.email_lookup_failed", {
+        did: auth.did,
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
     const allowed = new Set<string>();
     if (contract.client_email) allowed.add(contract.client_email.toLowerCase());
     for (const e of contract.invitee_emails ?? []) allowed.add(e.toLowerCase());
-    if (!callerEmail || !allowed.has(callerEmail)) {
+    const ok = verifiedEmails.some((e) => allowed.has(e));
+    if (!ok) {
       return NextResponse.json(
         {
           error: "not_invited",
           message:
-            "This contract is restricted. Ask the freelancer to invite the email address you're using.",
+            "This contract is restricted. Ask the freelancer to invite the email address linked to your account.",
         },
         { status: 403 },
       );
@@ -79,12 +86,22 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   }
 
   // First-time funding: bind client_id / client_email so future operations
-  // know who paid.
+  // know who paid. Email also comes from Privy verification — never trusted
+  // from the body.
   if (user && !contract.client_id) {
     await db.from("contracts").update({ client_id: user.did }).eq("id", id);
   }
-  if (callerEmail && !contract.client_email) {
-    await db.from("contracts").update({ client_email: callerEmail }).eq("id", id);
+  if (auth && !contract.client_email) {
+    if (verifiedEmails.length === 0) {
+      try {
+        verifiedEmails = await getVerifiedEmailsForUser(auth.did);
+      } catch {
+        // ignore — we just won't backfill client_email
+      }
+    }
+    if (verifiedEmails[0]) {
+      await db.from("contracts").update({ client_email: verifiedEmails[0] }).eq("id", id);
+    }
   }
 
   const isMock = !isTrustlessWorkConfigured();
@@ -110,7 +127,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     );
   }
 
-  return onChainFund({ contract, user, callerEmail, db });
+  return onChainFund({ contract, user, db });
 }
 
 /* ------------------------------------------------------------------------- */
@@ -119,7 +136,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 
 interface MockArgs {
   contract: ContractRow;
-  user: ReturnType<typeof readUserFromHeaders>;
+  user: { did: string } | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   db: any;
 }
@@ -156,24 +173,34 @@ async function mockFund({ contract, user, db }: MockArgs) {
 
 interface OnChainArgs {
   contract: ContractRow;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  user: any;
-  callerEmail: string | undefined;
+  user: { did: string } | null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   db: any;
 }
 
 async function onChainFund({ contract, user, db }: OnChainArgs) {
+  if (!user) {
+    return NextResponse.json(
+      { error: "unauthenticated", message: "Sign in to fund this contract on-chain." },
+      { status: 401 },
+    );
+  }
   // 1. Ensure the client (caller) has a Stellar wallet.
   let clientWallet: { id: string; address: string } | null = null;
   try {
     const w = await ensureStellarWallet(user.did);
     clientWallet = { id: w.id, address: w.address };
-    // Cache to the client's profile if we have one.
+    // Cache the wallet on the client's profile (preserve existing email).
+    const { data: existing } = await db
+      .from("profiles")
+      .select("email")
+      .eq("id", user.did)
+      .maybeSingle();
+    const email = (existing as { email: string } | null)?.email ?? "unknown@sunvasi.local";
     await db
       .from("profiles")
       .upsert(
-        { id: user.did, email: user.email ?? "unknown@sunvasi.local", stellar_wallet_id: w.id, payout_address: w.address },
+        { id: user.did, email, stellar_wallet_id: w.id, payout_address: w.address },
         { onConflict: "id" },
       );
   } catch (e) {

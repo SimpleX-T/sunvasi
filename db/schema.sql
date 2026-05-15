@@ -217,6 +217,13 @@ alter table activity enable row level security;
 
 -- service_role bypasses RLS by default; below policies cover anon/auth reads.
 
+-- All access to these tables goes through the service-role server-side. We
+-- revoke anon + authenticated grants so the API surface area is exactly
+-- "our Next.js routes", not "anyone with the publishable key".
+revoke select, insert, update, delete on
+  profiles, contracts, milestones, disputes, verdicts, clarifications, activity
+  from anon, authenticated;
+
 drop policy if exists profiles_read on profiles;
 create policy profiles_read on profiles
   for select using (true);
@@ -247,7 +254,41 @@ create policy clarifications_read on clarifications
   for select using (true);
 
 -- Realtime publication for activity + arbitration UI.
-alter publication supabase_realtime add table activity;
-alter publication supabase_realtime add table milestones;
-alter publication supabase_realtime add table clarifications;
-alter publication supabase_realtime add table verdicts;
+-- `alter publication ... add table` is not idempotent on its own; guard each
+-- with a check against pg_publication_tables so re-runs of this file don't
+-- error with "relation X is already member of publication Y".
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'activity'
+  ) then
+    alter publication supabase_realtime add table activity;
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'milestones'
+  ) then
+    alter publication supabase_realtime add table milestones;
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'clarifications'
+  ) then
+    alter publication supabase_realtime add table clarifications;
+  end if;
+end $$;
+
+do $$ begin
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'verdicts'
+  ) then
+    alter publication supabase_realtime add table verdicts;
+  end if;
+end $$;
