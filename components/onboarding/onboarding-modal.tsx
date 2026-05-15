@@ -66,7 +66,11 @@ export function OnboardingModal({ open, email, walletAddress, initial, onClose }
           role,
           skills,
           bio: bio.trim() || null,
-          payout_address: walletAddress ?? undefined,
+          // NOTE: do not pass payout_address here. Privy's default wallet on
+          // the user object is the EVM embedded wallet (0x...). The server
+          // side provisions the Stellar wallet (G...) and sets the correct
+          // payout_address itself — overriding it from here would clobber
+          // the Stellar address and break on-chain funding.
           mark_onboarded: true,
         }),
       });

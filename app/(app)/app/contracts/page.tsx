@@ -3,20 +3,29 @@ import { ArrowRight, ChevronRight, Plus } from "lucide-react";
 import { Topbar } from "@/components/shell/topbar";
 import { Avatar } from "@/components/ui/avatar";
 import { StatusBadge } from "@/components/ui/badge";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/auth";
 import { supabaseAdmin, type ContractRow } from "@/lib/supabase";
 import { formatUsdc, relativeTime } from "@/lib/utils";
 
 export default async function ContractsListPage() {
-  const user = await getCurrentUser().catch(() => null);
+  const [user, profile] = await Promise.all([
+    getCurrentUser().catch(() => null),
+    getCurrentProfile().catch(() => null),
+  ]);
   let contracts: ContractRow[] = [];
   if (user) {
     try {
       const db = supabaseAdmin();
+      // Same matching strategy as the dashboard — include client_email so
+      // pre-invited clients see their contract before they fund it.
+      const email = profile?.email?.toLowerCase();
+      const orFilter = email
+        ? `freelancer_id.eq.${user.did},client_id.eq.${user.did},client_email.eq.${email}`
+        : `freelancer_id.eq.${user.did},client_id.eq.${user.did}`;
       const { data } = await db
         .from("contracts")
         .select("*")
-        .or(`freelancer_id.eq.${user.did},client_id.eq.${user.did}`)
+        .or(orFilter)
         .order("created_at", { ascending: false });
       contracts = (data ?? []) as ContractRow[];
     } catch {

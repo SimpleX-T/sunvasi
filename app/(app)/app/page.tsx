@@ -32,10 +32,18 @@ export default async function DashboardPage() {
   if (user) {
     try {
       const db = supabaseAdmin();
+      // Match by Privy DID (owner / funder) AND by the client's email when
+      // the freelancer named them ahead of time — otherwise a client who
+      // signs up with the named email never sees the contract until they
+      // open the funding link.
+      const email = profile?.email?.toLowerCase();
+      const orFilter = email
+        ? `freelancer_id.eq.${user.did},client_id.eq.${user.did},client_email.eq.${email}`
+        : `freelancer_id.eq.${user.did},client_id.eq.${user.did}`;
       const { data } = await db
         .from("contracts")
         .select("*")
-        .or(`freelancer_id.eq.${user.did},client_id.eq.${user.did}`)
+        .or(orFilter)
         .order("created_at", { ascending: false });
       contracts = (data ?? []) as ContractRow[];
       activeCount = contracts.filter((c) => c.status === "active" || c.status === "disputed").length;
