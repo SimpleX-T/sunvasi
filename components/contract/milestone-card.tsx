@@ -1,14 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Check, ChevronDown, FileText, Link2, Loader2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
 import { SubmitDeliverableDialog } from "@/components/contract/submit-deliverable-dialog";
-import { formatUsdc, relativeTime } from "@/lib/utils";
+import { formatUsdc } from "@/lib/utils";
 import type { MilestoneRow, DeliverableFile, DeliverableLink } from "@/lib/supabase";
+
+/** ms → "2m 47s" / "1h 04m" / "12s" — drops trailing zero units. */
+function formatCountdown(ms: number): string {
+  if (ms <= 0) return "0s";
+  const totalSec = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSec / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+  if (hours > 0) {
+    return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+  }
+  return `${seconds}s`;
+}
 
 export type ViewerRole = "client" | "freelancer" | "viewer";
 
@@ -94,16 +110,35 @@ export function MilestoneCard({
     }
   }
 
-  // Auto-release status copy is role-aware. When the deadline is in the
-  // past we don't say "auto-releases X ago" (nonsense) — instead we surface
-  // why nothing has happened: the client still owes review/payment.
+  // Live ticker for the auto-release countdown — re-renders every second so
+  // the countdown actually ticks down in real time instead of showing the
+  // stale value from the original page render.
+  const [now, setNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    if (milestone.status !== "submitted") return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [milestone.status]);
+
+  // Auto-release status copy is role-aware. Three states:
+  //   • future    → live countdown (e.g. "Auto-releases in 2m 47s")
+  //   • due now-ish (within the next balance-poll window) → "Releasing now…"
+  //   • overdue (the worker hasn't fired yet for whatever reason) → role-aware reminder
   const autoReleaseInfo = (() => {
     if (milestone.status !== "submitted" || !milestone.auto_release_at) return null;
     const due = new Date(milestone.auto_release_at).getTime();
-    const overdue = due < Date.now();
-    if (!overdue) {
+    const remaining = due - now;
+    if (remaining > 0) {
       return {
-        label: `Auto-releases ${relativeTime(milestone.auto_release_at)}`,
+        label: `Auto-releases in ${formatCountdown(remaining)}`,
+        tone: "warning" as const,
+      };
+    }
+    // Within ~30s past the deadline the balance-poll worker should fire.
+    // Surface a "releasing now" hint so the freelancer sees motion.
+    if (remaining > -30_000) {
+      return {
+        label: "Releasing now…",
         tone: "warning" as const,
       };
     }
@@ -111,9 +146,7 @@ export function MilestoneCard({
       label:
         role === "client"
           ? "Auto-release window ended — review and pay below"
-          : role === "freelancer"
-            ? "Awaiting client review"
-            : "Awaiting client review",
+          : "Awaiting client review",
       tone: "danger" as const,
     };
   })();
