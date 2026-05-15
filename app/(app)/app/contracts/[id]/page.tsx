@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowUpRight, Copy } from "lucide-react";
+import { ArrowUpRight, Copy, Eye } from "lucide-react";
 import { Topbar } from "@/components/shell/topbar";
 import { Avatar } from "@/components/ui/avatar";
-import { StatusBadge } from "@/components/ui/badge";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { MilestoneCard, type ViewerRole } from "@/components/contract/milestone-card";
 import { ActivityTimeline } from "@/components/contract/activity-timeline";
 import { ContractActions } from "@/components/contract/contract-actions";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentProfile, getCurrentUser } from "@/lib/auth";
 import {
   supabaseAdmin,
   type ContractRow,
@@ -23,7 +23,10 @@ interface Props {
 
 export default async function ContractDetailPage({ params }: Props) {
   const { id } = await params;
-  const user = await getCurrentUser().catch(() => null);
+  const [user, profile] = await Promise.all([
+    getCurrentUser().catch(() => null),
+    getCurrentProfile().catch(() => null),
+  ]);
   const db = supabaseAdmin();
 
   // Accept either UUID or short_id in the URL.
@@ -45,12 +48,26 @@ export default async function ContractDetailPage({ params }: Props) {
     .order("created_at", { ascending: false })
     .limit(20);
 
-  const role: ViewerRole =
-    user?.did === contract.client_id
-      ? "client"
-      : user?.did === contract.freelancer_id
-        ? "freelancer"
-        : "viewer";
+  // Role resolution:
+  //   - freelancer   = the owner (DID match)
+  //   - client       = whoever's email matches the named client_email (or
+  //                    whose DID was bound to client_id at funding time)
+  //   - invitee      = email is in invitee_emails — view only, no actions
+  //   - viewer       = anyone else with read access (public link, etc.)
+  // Only client + freelancer can ACT on the contract; everyone else can view.
+  const viewerEmail = profile?.email?.toLowerCase();
+  const clientEmail = contract.client_email?.toLowerCase();
+  const inviteeEmails = (contract.invitee_emails ?? []).map((e) => e.toLowerCase());
+  const isFreelancer = !!user?.did && user.did === contract.freelancer_id;
+  const isClientByEmail = !!viewerEmail && !!clientEmail && viewerEmail === clientEmail;
+  const isClientByDid = !!user?.did && user.did === contract.client_id;
+  const isClient = isClientByEmail || isClientByDid;
+  const isInvitee = !!viewerEmail && inviteeEmails.includes(viewerEmail);
+  const role: ViewerRole = isClient
+    ? "client"
+    : isFreelancer
+      ? "freelancer"
+      : "viewer";
 
   const network = contract.escrow_network === "mainnet" ? "mainnet" : "testnet";
   const viewerHref = escrowViewerUrl(contract.escrow_id, network);
@@ -80,15 +97,31 @@ export default async function ContractDetailPage({ params }: Props) {
                 {contract.description}
               </p>
             ) : null}
-            <div className="mt-6 flex items-center gap-4 text-body-sm">
-              <Avatar
-                name={contract.client_email ?? "Client"}
-                size={28}
-                className="bg-warning/15 text-warning"
-              />
-              <span className="text-fg-muted">
-                Client · <span className="text-fg">{contract.client_email ?? "Pending"}</span>
-              </span>
+            <div className="mt-6 flex items-center gap-4 flex-wrap text-body-sm">
+              <div className="flex items-center gap-3">
+                <Avatar
+                  name={isClient ? "You" : contract.client_email ?? "Client"}
+                  size={28}
+                  className="bg-warning/15 text-warning"
+                />
+                <span className="text-fg-muted">
+                  Client ·{" "}
+                  <span className="text-fg">
+                    {isClient ? "You" : contract.client_email ?? "Pending"}
+                  </span>
+                </span>
+              </div>
+              {isInvitee && !isClient && !isFreelancer ? (
+                <Badge tone="info" dotted>
+                  <Eye className="h-3 w-3 mr-1" />
+                  View access
+                </Badge>
+              ) : null}
+              {isFreelancer ? (
+                <Badge tone="accent" dotted>
+                  Freelancer · You
+                </Badge>
+              ) : null}
             </div>
 
             {role === "freelancer" ? (

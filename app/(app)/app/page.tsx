@@ -32,13 +32,16 @@ export default async function DashboardPage() {
   if (user) {
     try {
       const db = supabaseAdmin();
-      // Match by Privy DID (owner / funder) AND by the client's email when
-      // the freelancer named them ahead of time — otherwise a client who
-      // signs up with the named email never sees the contract until they
-      // open the funding link.
+      // Match by:
+      //   - freelancer_id (owner)
+      //   - client_id (bound after first fund)
+      //   - client_email (pre-invited by name)
+      //   - invitee_emails ⊃ {viewer email} (view-only collaborators)
+      // Everyone involved sees the contract on their dashboard; only client +
+      // freelancer can actually act on it (UI gates actions further down).
       const email = profile?.email?.toLowerCase();
       const orFilter = email
-        ? `freelancer_id.eq.${user.did},client_id.eq.${user.did},client_email.eq.${email}`
+        ? `freelancer_id.eq.${user.did},client_id.eq.${user.did},client_email.eq.${email},invitee_emails.cs.{${email}}`
         : `freelancer_id.eq.${user.did},client_id.eq.${user.did}`;
       const { data } = await db
         .from("contracts")

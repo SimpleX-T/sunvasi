@@ -60,6 +60,24 @@ export async function signAndBroadcast(
   };
 }
 
+/** Fund an existing escrow with USDC. Signed by the funder (client). */
+export async function fundEscrowOnChain(args: {
+  escrowContractId: string;
+  amount: number;
+  signer: Signer;
+}): Promise<OnChainResult> {
+  const tw = getTrustlessWork();
+  const init = await tw.fundEscrow({
+    signer: args.signer.address,
+    contractId: args.escrowContractId,
+    amount: args.amount,
+  });
+  if (!init?.unsignedTransaction) {
+    throw new Error("TW fundEscrow returned no unsignedTransaction");
+  }
+  return signAndBroadcast(init.unsignedTransaction, args.signer);
+}
+
 /** Mark a milestone's status as e.g. "done". Signed by the milestone's
  * service provider (freelancer). */
 export async function changeMilestoneStatusOnChain(args: {

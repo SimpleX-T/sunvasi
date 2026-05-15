@@ -16,11 +16,11 @@ export default async function ContractsListPage() {
   if (user) {
     try {
       const db = supabaseAdmin();
-      // Same matching strategy as the dashboard — include client_email so
-      // pre-invited clients see their contract before they fund it.
+      // Same matching strategy as the dashboard — include client_email and
+      // invitee_emails so every party on a contract sees it.
       const email = profile?.email?.toLowerCase();
       const orFilter = email
-        ? `freelancer_id.eq.${user.did},client_id.eq.${user.did},client_email.eq.${email}`
+        ? `freelancer_id.eq.${user.did},client_id.eq.${user.did},client_email.eq.${email},invitee_emails.cs.{${email}}`
         : `freelancer_id.eq.${user.did},client_id.eq.${user.did}`;
       const { data } = await db
         .from("contracts")

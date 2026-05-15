@@ -38,8 +38,24 @@ export function MilestoneCard({
     setSubmitting(true);
     try {
       const res = await fetch(`/api/milestones/${milestone.id}/approve`, { method: "POST" });
-      if (!res.ok) throw new Error("approve_failed");
-      toast.success("Approved. Funds released.");
+      const payload = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        stage?: string;
+      };
+      if (!res.ok) {
+        const stage = payload.stage;
+        const fallback =
+          stage === "fund"
+            ? "Couldn't move USDC into escrow. Top up the client wallet from the Circle faucet."
+            : stage === "approve"
+              ? "TW rejected the approval. Check the contract state on the Trustless Work viewer."
+              : stage === "release"
+                ? "USDC moved into escrow but didn't release to the freelancer — retry to push it through."
+                : "Could not approve.";
+        toast.error(payload.message ?? fallback);
+        return;
+      }
+      toast.success(`Paid $${Number(milestone.amount_usdc).toFixed(2)} and released to freelancer.`);
       router.refresh();
     } catch {
       toast.error("Could not approve.");
@@ -172,7 +188,7 @@ export function MilestoneCard({
                 disabled={submitting}
                 leftIcon={submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
               >
-                Approve & release
+                Pay & approve · ${Number(milestone.amount_usdc).toFixed(2)}
               </Button>
               <a
                 href={`/app/contracts/${milestone.contract_id}/dispute?milestone=${milestone.id}`}

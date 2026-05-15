@@ -50,36 +50,40 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     .maybeSingle<ContractRow>();
   if (!contract) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  // ── Access check for restricted contracts ──────────────────────────────
-  // The caller's email comes from Privy's verified linked accounts, never
-  // from the request body. This prevents a client from passing an arbitrary
-  // email to bypass the invite list.
+  // ── Funding is ALWAYS gated to the named client ────────────────────────
+  //
+  // The `client_email` on a contract is the one person allowed to put money
+  // in. Invitees can VIEW the contract (per visibility setting) but cannot
+  // fund — only the client can. Visibility controls read access; funding is
+  // a separate, stricter gate.
+  //
+  // The caller's email comes from Privy's verified linked accounts so a
+  // user can't pass an arbitrary email in the body to impersonate someone.
+  if (!auth) {
+    return NextResponse.json(
+      { error: "unauthenticated", message: "Sign in to fund this contract." },
+      { status: 401 },
+    );
+  }
   let verifiedEmails: string[] = [];
-  if (contract.visibility === "restricted") {
-    if (!auth) {
-      return NextResponse.json(
-        { error: "unauthenticated", message: "This contract is restricted — sign in to fund." },
-        { status: 401 },
-      );
-    }
-    try {
-      verifiedEmails = await getVerifiedEmailsForUser(auth.did);
-    } catch (e) {
-      logger.warn("fund.email_lookup_failed", {
-        did: auth.did,
-        message: e instanceof Error ? e.message : String(e),
-      });
-    }
-    const allowed = new Set<string>();
-    if (contract.client_email) allowed.add(contract.client_email.toLowerCase());
-    for (const e of contract.invitee_emails ?? []) allowed.add(e.toLowerCase());
-    const ok = verifiedEmails.some((e) => allowed.has(e));
-    if (!ok) {
+  try {
+    verifiedEmails = await getVerifiedEmailsForUser(auth.did);
+  } catch (e) {
+    logger.warn("fund.email_lookup_failed", {
+      did: auth.did,
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+  // If no client_email is set on the contract yet, bind to whichever account
+  // is funding (first-time funding). Otherwise enforce a strict match.
+  if (contract.client_email) {
+    const target = contract.client_email.toLowerCase();
+    const isClient = verifiedEmails.some((e) => e === target);
+    if (!isClient) {
       return NextResponse.json(
         {
-          error: "not_invited",
-          message:
-            "This contract is restricted. Ask the freelancer to invite the email address linked to your account.",
+          error: "not_the_client",
+          message: `Only ${contract.client_email} can fund this contract. You have view access only.`,
         },
         { status: 403 },
       );
