@@ -9,6 +9,7 @@ import {
   isPrivyServerConfigured,
   rawSignHash,
 } from "@/lib/privy-server";
+import { ensureFundableAccount } from "@/lib/stellar-account";
 import { prepareForSigning, attachRawSignature, toSignedXdr } from "@/lib/stellar-tx";
 import { USDC_ISSUERS, getNetwork, isStellarAddress } from "@/lib/stellar";
 
@@ -178,6 +179,45 @@ interface OnChainArgs {
   db: any;
 }
 
+/** Provision a Stellar wallet for `did` if missing AND make it on-chain
+ * fundable (activate + USDC trustline). Returns the wallet + a record of
+ * what was done. Throws with a clear message on hard failure. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function prepareWallet(did: string, role: string, db: any) {
+  // 1. Ensure Privy Stellar wallet exists.
+  const wallet = await ensureStellarWallet(did);
+  if (!wallet?.id || !wallet.address || !isStellarAddress(wallet.address)) {
+    throw new Error(`Privy returned no Stellar wallet for ${role} (${did}).`);
+  }
+
+  // 2. Cache to profile (preserve email if present).
+  const { data: existing } = await db
+    .from("profiles")
+    .select("email, payout_address")
+    .eq("id", did)
+    .maybeSingle();
+  const email = (existing as { email?: string } | null)?.email ?? `${role}@sunvasi.local`;
+  const oldAddress = (existing as { payout_address?: string } | null)?.payout_address ?? null;
+  // If the stored address is non-Stellar, overwrite. If it was already the
+  // new Stellar one this is a no-op.
+  if (oldAddress !== wallet.address) {
+    await db
+      .from("profiles")
+      .upsert(
+        { id: did, email, stellar_wallet_id: wallet.id, payout_address: wallet.address },
+        { onConflict: "id" },
+      );
+  }
+
+  // 3. Activate + trustline. Idempotent: short-circuits when already ready.
+  const fundable = await ensureFundableAccount({
+    walletId: wallet.id,
+    address: wallet.address,
+  });
+
+  return { wallet, fundable };
+}
+
 async function onChainFund({ contract, user, db }: OnChainArgs) {
   if (!user) {
     return NextResponse.json(
@@ -185,57 +225,74 @@ async function onChainFund({ contract, user, db }: OnChainArgs) {
       { status: 401 },
     );
   }
-  // 1. Ensure the client (caller) has a Stellar wallet.
-  let clientWallet: { id: string; address: string } | null = null;
+
+  // 1. Ensure the client (caller) has a fundable Stellar wallet.
+  let clientWallet: { id: string; address: string };
   try {
-    const w = await ensureStellarWallet(user.did);
-    clientWallet = { id: w.id, address: w.address };
-    // Cache the wallet on the client's profile (preserve existing email).
-    const { data: existing } = await db
-      .from("profiles")
-      .select("email")
-      .eq("id", user.did)
-      .maybeSingle();
-    const email = (existing as { email: string } | null)?.email ?? "unknown@sunvasi.local";
-    await db
-      .from("profiles")
-      .upsert(
-        { id: user.did, email, stellar_wallet_id: w.id, payout_address: w.address },
-        { onConflict: "id" },
-      );
-  } catch (e) {
-    logger.error("fund.client_wallet_failed", {
+    const { wallet, fundable } = await prepareWallet(user.did, "client", db);
+    clientWallet = { id: wallet.id, address: wallet.address };
+    logger.info("fund.client_wallet_ready", {
       did: user.did,
-      message: e instanceof Error ? e.message : String(e),
+      address: wallet.address,
+      activated: fundable.activated,
+      trustline_established: fundable.trustline_established,
     });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    logger.error("fund.client_wallet_failed", { did: user.did, message });
     return NextResponse.json(
-      { error: "wallet_provision_failed", message: "Could not provision your Privy Stellar wallet." },
+      {
+        error: "wallet_provision_failed",
+        message: `Could not prepare your Stellar wallet: ${message}`,
+      },
       { status: 502 },
     );
   }
 
-  // 2. Look up the freelancer's wallet — they need to exist as an on-chain
-  //    receiver for milestone payouts.
+  // 2. Same for the freelancer (receiver) — the server provisions on their
+  //    behalf if they haven't signed in yet, so funding doesn't block on
+  //    asking the freelancer to do anything.
   if (!contract.freelancer_id) {
     return NextResponse.json(
       { error: "no_freelancer", message: "Contract has no freelancer owner." },
       { status: 412 },
     );
   }
-  const { data: freelancerRaw } = await db
-    .from("profiles")
-    .select("*")
-    .eq("id", contract.freelancer_id)
-    .maybeSingle();
-  const freelancer = (freelancerRaw ?? null) as ProfileRow | null;
-  if (!freelancer || !freelancer.payout_address || !isStellarAddress(freelancer.payout_address)) {
+  let freelancer: ProfileRow;
+  try {
+    const { wallet, fundable } = await prepareWallet(
+      contract.freelancer_id,
+      "freelancer",
+      db,
+    );
+    logger.info("fund.freelancer_wallet_ready", {
+      did: contract.freelancer_id,
+      address: wallet.address,
+      activated: fundable.activated,
+      trustline_established: fundable.trustline_established,
+    });
+    // Refetch the profile with its new wallet info for downstream use.
+    const { data } = await db
+      .from("profiles")
+      .select("*")
+      .eq("id", contract.freelancer_id)
+      .maybeSingle();
+    freelancer = data as ProfileRow;
+    if (!freelancer || !freelancer.payout_address || !isStellarAddress(freelancer.payout_address)) {
+      throw new Error("Freelancer profile is missing a Stellar payout_address after provisioning.");
+    }
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    logger.error("fund.freelancer_wallet_failed", {
+      did: contract.freelancer_id,
+      message,
+    });
     return NextResponse.json(
       {
-        error: "freelancer_wallet_missing",
-        message:
-          "The freelancer hasn't completed onboarding yet (no Stellar wallet provisioned). Ask them to sign in once so their wallet is created.",
+        error: "freelancer_wallet_failed",
+        message: `Could not prepare the freelancer's Stellar wallet: ${message}`,
       },
-      { status: 412 },
+      { status: 502 },
     );
   }
 

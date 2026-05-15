@@ -17,6 +17,7 @@
  * ------------------------------------------------------------------------ */
 
 import {
+  Account,
   Asset,
   BASE_FEE,
   Networks,
@@ -62,6 +63,22 @@ export async function fetchAccount(
   return (await res.json()) as HorizonAccount;
 }
 
+/** Poll Horizon until the account appears or attempts are exhausted. Used
+ * after Friendbot funding to defeat the ~1–5s lag before Horizon indexes the
+ * new account. */
+async function waitForAccount(
+  address: string,
+  network: StellarNetwork,
+  { maxAttempts = 8, delayMs = 800 } = {},
+): Promise<HorizonAccount | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const a = await fetchAccount(address, network);
+    if (a) return a;
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return null;
+}
+
 export function accountHasUsdcTrustline(
   account: HorizonAccount,
   network: StellarNetwork,
@@ -105,18 +122,17 @@ export async function establishUsdcTrustline(args: {
     throw new Error("Cannot establish trustline before account is activated.");
   }
 
-  const builder = new TransactionBuilder(
-    {
-      accountId: () => account.account_id,
-      sequenceNumber: () => account.sequence,
-      incrementSequenceNumber: () => undefined,
-    },
-    { fee: BASE_FEE, networkPassphrase },
-  )
-    .addOperation(Operation.changeTrust({ asset: usdc }))
-    .setTimeout(180);
+  // Use the SDK's Account class — it implements the
+  // accountId/sequenceNumber/incrementSequenceNumber protocol that
+  // TransactionBuilder relies on. Hand-rolling these as constant getters made
+  // `incrementSequenceNumber` a no-op, which produced txs at the existing
+  // sequence (sequence-mismatch rejections from Horizon).
+  const sdkAccount = new Account(account.account_id, account.sequence);
 
-  const tx = builder.build();
+  const tx = new TransactionBuilder(sdkAccount, { fee: BASE_FEE, networkPassphrase })
+    .addOperation(Operation.changeTrust({ asset: usdc }))
+    .setTimeout(180)
+    .build();
   const hash = Buffer.from(tx.hash()).toString("hex");
   const signatureHex = await rawSignHash(walletId, hash);
   attachRawSignature(tx, address, signatureHex);
@@ -161,6 +177,7 @@ export async function ensureFundableAccount(args: {
   activated: boolean;
   trustline_established: boolean;
   already_ready: boolean;
+  trustline_tx_hash?: string;
 }> {
   const network = getNetwork();
   // 1. Check current state
@@ -170,8 +187,9 @@ export async function ensureFundableAccount(args: {
     if (network === "testnet") {
       logger.info("stellar.activate.friendbot", { address: args.address });
       await activateTestnetAccount(args.address);
-      // Friendbot is synchronous; re-fetch.
-      account = await fetchAccount(args.address, network);
+      // Horizon is eventually-consistent — after Friendbot it can take a few
+      // seconds for the new account to show. Poll instead of single re-fetch.
+      account = await waitForAccount(args.address, network);
       activated = true;
     } else {
       // TODO: mainnet sponsorship from SUNVASI_TREASURY_ACCOUNT.
@@ -181,7 +199,7 @@ export async function ensureFundableAccount(args: {
     }
   }
   if (!account) {
-    throw new Error("Account still not found after activation attempt.");
+    throw new Error("Account still not found after activation attempt (Horizon lag).");
   }
 
   // 2. Trustline?
@@ -195,7 +213,7 @@ export async function ensureFundableAccount(args: {
   }
 
   logger.info("stellar.trustline.establish", { address: args.address, network });
-  await establishUsdcTrustline({
+  const trustline = await establishUsdcTrustline({
     walletId: args.walletId,
     address: args.address,
     network,
@@ -206,5 +224,6 @@ export async function ensureFundableAccount(args: {
     activated,
     trustline_established: true,
     already_ready: false,
+    trustline_tx_hash: trustline.tx_hash,
   };
 }

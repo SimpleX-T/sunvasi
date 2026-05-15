@@ -7,10 +7,12 @@ import {
   CircleOff,
   Loader2,
   RefreshCcw,
+  Wallet,
   XCircle,
   Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAuthedFetch } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
 type Status = "ok" | "warn" | "fail" | "unconfigured";
@@ -153,7 +155,106 @@ export function DiagnosticsBoard() {
       </ul>
 
       <TwLiveTest />
+      <ReprovisionPanel />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Re-provision the signed-in user's Stellar wallet + trustline               */
+/* ------------------------------------------------------------------------- */
+
+interface ReprovisionResult {
+  ok: boolean;
+  did?: string;
+  address?: string;
+  steps: Array<{ name: string; ok: boolean; detail?: string }>;
+  error?: string;
+}
+
+function ReprovisionPanel() {
+  const authed = useAuthedFetch();
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ReprovisionResult | null>(null);
+
+  async function run() {
+    setBusy(true);
+    try {
+      const res = await authed("/api/diagnostics/reprovision", { method: "POST" });
+      setResult((await res.json()) as ReprovisionResult);
+    } catch (e) {
+      setResult({
+        ok: false,
+        steps: [],
+        error: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-lg border border-border bg-bg-elevated p-6 space-y-5">
+      <header className="flex items-start gap-4">
+        <Wallet className="h-5 w-5 text-accent mt-1" />
+        <div className="flex-1 min-w-0">
+          <h3 className="font-display text-display-sm tracking-tight text-fg">
+            Re-provision your Stellar wallet
+          </h3>
+          <p className="mt-1 text-body-sm text-fg-muted max-w-[68ch]">
+            Forces a fresh run of the wallet pipeline for the signed-in user:
+            (1) ensure a Privy Stellar wallet exists, (2) activate it on-chain
+            via Friendbot, (3) establish the USDC trustline. Use this if
+            funding fails with &ldquo;wallet does not have USDC asset&rdquo; —
+            it surfaces exactly which step failed instead of silent retries.
+          </p>
+        </div>
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={run}
+          disabled={busy}
+          leftIcon={busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wallet className="h-3.5 w-3.5" />}
+        >
+          Re-provision
+        </Button>
+      </header>
+
+      {result ? (
+        <div className={cn("rounded border p-4", TONES[result.ok ? "ok" : "fail"])}>
+          {result.address ? (
+            <p className="font-mono text-mono-sm text-fg break-all mb-3">
+              {result.address}
+            </p>
+          ) : null}
+          <ol className="space-y-2">
+            {result.steps.map((s) => (
+              <li key={s.name} className="flex items-start gap-3 text-body-sm">
+                {s.ok ? (
+                  <CheckCircle2 className="h-4 w-4 mt-0.5 text-success" />
+                ) : (
+                  <XCircle className="h-4 w-4 mt-0.5 text-danger" />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-fg font-mono">{s.name}</p>
+                  {s.detail ? (
+                    <p className="text-fg-muted">{s.detail}</p>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+          {result.error ? (
+            <p className="mt-2 text-body-sm text-danger">{result.error}</p>
+          ) : null}
+        </div>
+      ) : (
+        <div className="rounded border border-dashed border-border bg-bg p-4 text-body-sm text-fg-subtle italic">
+          Click <strong className="text-fg">Re-provision</strong> to retry wallet setup with full
+          error visibility.
+        </div>
+      )}
+    </section>
   );
 }
 
