@@ -93,7 +93,6 @@ export interface UnsignedTransactionResponse {
 
 export interface SendTransactionInput {
   signedXdr: string;
-  returnEscrowDataIsRequired?: boolean;
 }
 
 export interface SendTransactionResponse {

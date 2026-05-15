@@ -346,16 +346,33 @@ async function onChainFund({ contract, user, db }: OnChainArgs) {
     }
     unsignedXdr = result.unsignedTransaction;
   } catch (e) {
-    const err = e as { status?: number; body?: unknown; message?: string };
+    const err = e as {
+      status?: number;
+      body?: { message?: string; details?: unknown };
+      message?: string;
+    };
+    const details = err.body?.details ?? null;
     logger.error("fund.tw_initialize_failed", {
       contract_id: contract.id,
       status: err.status,
       message: err.message,
+      details,
+      sent_payload: {
+        signer: clientWallet.address,
+        engagement_id: contract.short_id,
+        platform_address: clientWallet.address,
+        service_provider: freelancer.payout_address,
+        receiver: freelancer.payout_address,
+        milestone_count: ms.length,
+        total_amount: ms.reduce((acc, m) => acc + Number(m.amount_usdc), 0),
+        trustline_issuer: usdcIssuer,
+      },
     });
     return NextResponse.json(
       {
         error: "tw_initialize_failed",
         message: err.message ?? "Trustless Work rejected the escrow.",
+        details,
         body: err.body ?? null,
       },
       { status: 502 },
@@ -386,7 +403,7 @@ async function onChainFund({ contract, user, db }: OnChainArgs) {
   let txHash: string | null = null;
   let escrowContractId: string | null = null;
   try {
-    const result = await tw.sendTransaction({ signedXdr, returnEscrowDataIsRequired: true });
+    const result = await tw.sendTransaction({ signedXdr });
     txHash = result?.hash ?? null;
     escrowContractId = result?.contractId ?? null;
     if (!escrowContractId && result?.escrow && typeof result.escrow === "object") {
