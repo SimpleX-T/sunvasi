@@ -76,7 +76,16 @@ export type ArbitrationEvent =
   | { type: "done"; data: Record<string, never> };
 
 const MAX_ITERATIONS = 12;
-const CLARIFICATION_TIMEOUT_MS = 10 * 60 * 1000;
+/** How long the arbitrator waits for a human to answer a request_clarification
+ * before assuming "no further input available" and proceeding. Defaults to
+ * 10 minutes; the env override is essential for the demo where there's no
+ * answer-clarification UI yet. Set to a tiny value (e.g. 1) to effectively
+ * disable the human-in-the-loop step. */
+const CLARIFICATION_TIMEOUT_MS = (() => {
+  const fromEnv = Number(process.env.SUNVASI_CLARIFICATION_TIMEOUT_SECONDS);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv * 1000;
+  return 10 * 60 * 1000;
+})();
 
 interface ArbitrationContextData {
   dispute: DisputeRow;
@@ -417,9 +426,23 @@ async function requestClarificationImpl(
   }
   const id = (insert as { id: string }).id;
 
+  // Tiny timeouts (≤ 2s) skip polling entirely so the demo flow doesn't even
+  // pause — the model immediately gets "no input available" and moves on.
+  if (CLARIFICATION_TIMEOUT_MS <= 2000) {
+    await supabase.from("clarifications").update({ timed_out: true }).eq("id", id);
+    return {
+      summary: `Clarification skipped — no human-in-the-loop in this run.`,
+      payload: {
+        status: "timeout",
+        note:
+          "No clarification answer available. Proceed with the evidence you already have and submit a verdict.",
+      },
+    };
+  }
+
   const started = Date.now();
   while (Date.now() - started < CLARIFICATION_TIMEOUT_MS) {
-    await new Promise((r) => setTimeout(r, 4000));
+    await new Promise((r) => setTimeout(r, 2000));
     const { data: row } = await supabase
       .from("clarifications")
       .select("response, responded_at")
