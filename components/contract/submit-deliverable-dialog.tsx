@@ -3,15 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import {
-  FileText,
-  Link2,
-  Loader2,
-  Plus,
-  Upload,
-  Send,
-  X,
-} from "lucide-react";
+import { FileText, Link2, Loader2, Plus, Upload, Send, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -105,7 +97,9 @@ export function SubmitDeliverableDialog({
           error?: { message: string };
         };
         if (!up.ok || !upJson.secure_url) {
-          toast.error(upJson.error?.message ?? `Upload failed for ${file.name}.`);
+          toast.error(
+            upJson.error?.message ?? `Upload failed for ${file.name}.`,
+          );
           continue;
         }
         setFiles((prev) => [
@@ -144,7 +138,9 @@ export function SubmitDeliverableDialog({
         }),
       });
       if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        const payload = (await res.json().catch(() => ({}))) as {
+          error?: string;
+        };
         toast.error(payload.error ?? "Submission failed.");
         return;
       }
@@ -164,8 +160,9 @@ export function SubmitDeliverableDialog({
       <DialogContent className="max-w-xl">
         <DialogTitle>Submit deliverable</DialogTitle>
         <DialogDescription className="mt-1">
-          For <span className="font-mono text-fg">{milestoneTitle}</span> — add files, links,
-          and a short note. The client gets an emailed copy of what you submit.
+          For <span className="font-mono text-fg">{milestoneTitle}</span> — add
+          files, links, and a short note. The client gets an emailed copy of
+          what you submit.
         </DialogDescription>
 
         <div className="mt-6 space-y-6">
@@ -182,13 +179,17 @@ export function SubmitDeliverableDialog({
                     className="flex items-center gap-3 rounded border border-border bg-bg px-3 py-2 text-body-sm"
                   >
                     <FileText className="h-3.5 w-3.5 text-fg-subtle shrink-0" />
-                    <span className="flex-1 min-w-0 truncate text-fg">{f.filename}</span>
+                    <span className="flex-1 min-w-0 truncate text-fg">
+                      {f.filename}
+                    </span>
                     <span className="font-mono text-mono-sm text-fg-subtle">
                       {(f.size / 1024).toFixed(0)}KB
                     </span>
                     <button
                       type="button"
-                      onClick={() => setFiles(files.filter((_, idx) => idx !== i))}
+                      onClick={() =>
+                        setFiles(files.filter((_, idx) => idx !== i))
+                      }
                       className="text-fg-subtle hover:text-danger transition-colors"
                       aria-label={`Remove ${f.filename}`}
                     >
@@ -253,11 +254,12 @@ export function SubmitDeliverableDialog({
                           ),
                         )
                       }
-                      leadingIcon={<Link2 className="h-3.5 w-3.5" />}
                     />
                     <button
                       type="button"
-                      onClick={() => setLinks(links.filter((_, idx) => idx !== i))}
+                      onClick={() =>
+                        setLinks(links.filter((_, idx) => idx !== i))
+                      }
                       className="text-fg-subtle hover:text-danger transition-colors px-2"
                       aria-label="Remove link"
                     >
@@ -303,7 +305,11 @@ export function SubmitDeliverableDialog({
             onClick={onSubmit}
             disabled={submitting || uploading}
             leftIcon={
-              submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />
+              submitting ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )
             }
           >
             Submit deliverable

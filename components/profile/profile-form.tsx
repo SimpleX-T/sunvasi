@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Save, Upload, X } from "lucide-react";
+import { ArrowUpRight, Copy, Check, Loader2, Save, Upload, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { SkillsPicker } from "@/components/skills-picker";
 import { useAuthedFetch } from "@/lib/api-client";
-import { cn, shortenAddress } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import type { ProfileRole, ProfileRow } from "@/lib/supabase";
 
 const ROLE_OPTIONS: Array<{ id: ProfileRole; label: string }> = [
@@ -245,14 +245,12 @@ export function ProfileForm({ profile }: { profile: ProfileRow }) {
         </Button>
       </Section>
 
-      <Section label="Payout address (read-only)">
+      <Section label="Stellar wallet">
         {profile.payout_address ? (
-          <code className="font-mono text-mono-sm text-fg">
-            {shortenAddress(profile.payout_address, 14, 10)}
-          </code>
+          <WalletPanel address={profile.payout_address} />
         ) : (
           <p className="text-body-sm text-fg-subtle italic">
-            Connect a Stellar wallet (e.g. Freighter) from a contract page to bind this.
+            Your Stellar wallet will be provisioned automatically on next sign-in.
           </p>
         )}
       </Section>
@@ -277,5 +275,57 @@ function Section({ label, children }: { label: string; children: React.ReactNode
       <p className="text-caption uppercase tracking-[0.16em] text-fg-subtle mb-3">{label}</p>
       {children}
     </section>
+  );
+}
+
+function WalletPanel({ address }: { address: string }) {
+  const [copied, setCopied] = useState(false);
+  const network =
+    process.env.NEXT_PUBLIC_STELLAR_NETWORK === "mainnet" ? "public" : "testnet";
+  const explorerUrl = `https://stellar.expert/explorer/${network}/account/${address}`;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 rounded border border-border bg-bg p-3">
+        <code className="flex-1 min-w-0 font-mono text-mono-sm text-fg break-all">
+          {address}
+        </code>
+        <button
+          type="button"
+          onClick={() => {
+            navigator.clipboard.writeText(address).catch(() => undefined);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1600);
+          }}
+          className="inline-flex items-center gap-1.5 rounded border border-border hover:border-border-strong px-2.5 py-1.5 text-caption uppercase tracking-[0.14em] text-fg-muted hover:text-fg transition-colors"
+          aria-label="Copy wallet address"
+        >
+          {copied ? (
+            <Check className="h-3 w-3 text-success" />
+          ) : (
+            <Copy className="h-3 w-3" />
+          )}
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-3 text-body-sm text-fg-muted">
+        <a
+          href={explorerUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 hover:text-fg transition-colors"
+        >
+          View on Stellar Expert
+          <ArrowUpRight className="h-3.5 w-3.5" />
+        </a>
+      </div>
+
+      <p className="text-body-sm text-fg-subtle leading-[1.55] max-w-[60ch]">
+        USDC released from approved milestones lands here. Off-ramp to Naira via Yellow
+        Card, Onboard, or Busha. Sunvasi manages this wallet for you on testnet — full
+        self-custody (export to Freighter or another Stellar wallet) is coming next.
+      </p>
+    </div>
   );
 }

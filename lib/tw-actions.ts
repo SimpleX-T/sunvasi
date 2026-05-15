@@ -164,13 +164,20 @@ export async function resolveMilestoneDisputeOnChain(args: {
 export async function tryOnChain<T extends OnChainResult>(
   description: string,
   fn: () => Promise<T>,
-): Promise<{ ok: boolean; result: T | null; error: string | null }> {
+): Promise<{ ok: boolean; result: T | null; error: string | null; body: unknown }> {
   try {
     const result = await fn();
-    return { ok: true, result, error: null };
+    return { ok: true, result, error: null, body: null };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
-    logger.warn("tw_action.failed", { description, error });
-    return { ok: false, result: null, error };
+    // TrustlessWorkError carries the upstream body — surface the validation
+    // details when present so the caller can show "milestone.amount must be
+    // a number" instead of just "Validation failed".
+    const body =
+      e && typeof e === "object" && "body" in (e as Record<string, unknown>)
+        ? (e as { body: unknown }).body
+        : null;
+    logger.warn("tw_action.failed", { description, error, body });
+    return { ok: false, result: null, error, body };
   }
 }

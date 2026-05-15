@@ -130,7 +130,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       error: fund.error,
     };
     if (!fundResult.ok) {
-      logger.error("milestone.fund.failed", { milestone_id: id, error: fund.error });
+      logger.error("milestone.fund.failed", {
+        milestone_id: id,
+        error: fund.error,
+        body: fund.body,
+      });
       return NextResponse.json(
         {
           error: "fund_failed",
@@ -138,6 +142,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
             fund.error ??
             "Couldn't move USDC into escrow. Your wallet may be short — top up from the Circle faucet and retry.",
           stage: "fund",
+          body: fund.body,
         },
         { status: 502 },
       );
@@ -159,9 +164,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       logger.error("milestone.approve.failed", {
         milestone_id: id,
         error: approve.error,
+        body: approve.body,
       });
       return NextResponse.json(
-        { error: "approve_failed", message: approve.error, stage: "approve" },
+        {
+          error: "approve_failed",
+          message: approve.error,
+          stage: "approve",
+          body: approve.body,
+        },
         { status: 502 },
       );
     }
@@ -182,6 +193,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       logger.error("milestone.release.failed", {
         milestone_id: id,
         error: release.error,
+        body: release.body,
       });
       // Approval succeeded but release didn't — mark approved (not released)
       // so the client knows the milestone is half-way through.
@@ -196,6 +208,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
           message: release.error,
           stage: "release",
           approved_tx: approveResult.tx_hash,
+          body: release.body,
         },
         { status: 502 },
       );

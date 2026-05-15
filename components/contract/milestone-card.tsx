@@ -37,37 +37,86 @@ export function MilestoneCard({
   async function approve() {
     setSubmitting(true);
     try {
-      const res = await fetch(`/api/milestones/${milestone.id}/approve`, { method: "POST" });
-      const payload = (await res.json().catch(() => ({}))) as {
+      const res = await fetch(`/api/milestones/${milestone.id}/approve`, {
+        method: "POST",
+      });
+      const rawText = await res.text();
+      let payload: {
+        error?: string;
         message?: string;
         stage?: string;
-      };
+        body?: { message?: string; details?: Record<string, string[]> };
+      } = {};
+      try {
+        payload = rawText ? JSON.parse(rawText) : {};
+      } catch {
+        // Non-JSON response. Treat the raw text as the message.
+        payload = { message: rawText.slice(0, 240) };
+      }
+
       if (!res.ok) {
+        // Prefer the upstream TW validation detail when present — it tells the
+        // user (and us) which field actually failed.
+        const fieldErrors = payload.body?.details
+          ? Object.entries(payload.body.details)
+              .map(([k, v]) => `${k}: ${Array.isArray(v) ? v[0] : v}`)
+              .join("; ")
+          : null;
         const stage = payload.stage;
-        const fallback =
+        const stageHint =
           stage === "fund"
-            ? "Couldn't move USDC into escrow. Top up the client wallet from the Circle faucet."
+            ? "USDC didn't move into escrow."
             : stage === "approve"
-              ? "TW rejected the approval. Check the contract state on the Trustless Work viewer."
+              ? "TW rejected the approval."
               : stage === "release"
-                ? "USDC moved into escrow but didn't release to the freelancer — retry to push it through."
-                : "Could not approve.";
-        toast.error(payload.message ?? fallback);
+                ? "Approved but couldn't release — retry."
+                : null;
+        const message =
+          fieldErrors ??
+          payload.message ??
+          payload.body?.message ??
+          stageHint ??
+          `HTTP ${res.status} — see dev-server console for the full response.`;
+        console.error("approve.failed", { status: res.status, payload });
+        toast.error(message);
         return;
       }
-      toast.success(`Paid $${Number(milestone.amount_usdc).toFixed(2)} and released to freelancer.`);
+      toast.success(
+        `Paid $${Number(milestone.amount_usdc).toFixed(2)} and released to freelancer.`,
+      );
       router.refresh();
-    } catch {
-      toast.error("Could not approve.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Network error while approving.";
+      console.error("approve.threw", e);
+      toast.error(msg);
     } finally {
       setSubmitting(false);
     }
   }
 
-  const countdown =
-    milestone.status === "submitted" && milestone.auto_release_at
-      ? `Auto-releases ${relativeTime(milestone.auto_release_at)}`
-      : null;
+  // Auto-release status copy is role-aware. When the deadline is in the
+  // past we don't say "auto-releases X ago" (nonsense) — instead we surface
+  // why nothing has happened: the client still owes review/payment.
+  const autoReleaseInfo = (() => {
+    if (milestone.status !== "submitted" || !milestone.auto_release_at) return null;
+    const due = new Date(milestone.auto_release_at).getTime();
+    const overdue = due < Date.now();
+    if (!overdue) {
+      return {
+        label: `Auto-releases ${relativeTime(milestone.auto_release_at)}`,
+        tone: "warning" as const,
+      };
+    }
+    return {
+      label:
+        role === "client"
+          ? "Auto-release window ended — review and pay below"
+          : role === "freelancer"
+            ? "Awaiting client review"
+            : "Awaiting client review",
+      tone: "danger" as const,
+    };
+  })();
 
   return (
     <article className="rounded-lg border border-border bg-bg-elevated overflow-hidden">
@@ -88,7 +137,15 @@ export function MilestoneCard({
             <span className="font-mono text-mono-sm tabular-nums">
               ${formatUsdc(milestone.amount_usdc)}
             </span>
-            {countdown ? <span className="text-warning font-mono text-mono-sm">{countdown}</span> : null}
+            {autoReleaseInfo ? (
+              <span
+                className={`font-mono text-mono-sm ${
+                  autoReleaseInfo.tone === "danger" ? "text-danger" : "text-warning"
+                }`}
+              >
+                {autoReleaseInfo.label}
+              </span>
+            ) : null}
           </div>
         </div>
         <ChevronDown
