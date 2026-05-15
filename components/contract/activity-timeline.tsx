@@ -1,4 +1,4 @@
-import { Check, FileUp, Gavel, Mail, Pencil, Sparkles, Wallet, X } from "lucide-react";
+import { Check, Clock, FileUp, Gavel, Mail, Pencil, Sparkles, Wallet, X } from "lucide-react";
 import type { ActivityRow } from "@/lib/supabase";
 import { relativeTime } from "@/lib/utils";
 
@@ -10,6 +10,7 @@ const ICONS: Record<string, typeof Check> = {
   submitted: FileUp,
   approved: Check,
   released: Check,
+  auto_released: Clock,
   disputed: Gavel,
   verdict: Gavel,
   cancelled: X,
@@ -23,6 +24,7 @@ const LABELS: Record<string, string> = {
   submitted: "Milestone submitted",
   approved: "Milestone approved",
   released: "Funds released",
+  auto_released: "Auto-released to freelancer",
   disputed: "Dispute opened",
   verdict: "Verdict reached",
   cancelled: "Cancelled",

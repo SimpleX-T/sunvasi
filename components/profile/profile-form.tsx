@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowUpRight, Copy, Check, Loader2, Save, Upload, X } from "lucide-react";
+import { ArrowUpRight, Copy, Check, Loader2, RefreshCcw, Save, Upload, Wallet, X } from "lucide-react";
+import { useEffect } from "react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -278,14 +279,116 @@ function Section({ label, children }: { label: string; children: React.ReactNode
   );
 }
 
+interface BalanceResponse {
+  state: "ok" | "not_provisioned" | "not_activated" | "error";
+  address?: string | null;
+  network?: string;
+  usdc?: { balance: string; trustline: boolean } | null;
+  xlm?: { balance: string } | null;
+  fetched_at?: string;
+  message?: string;
+}
+
 function WalletPanel({ address }: { address: string }) {
+  const authed = useAuthedFetch();
   const [copied, setCopied] = useState(false);
+  const [balance, setBalance] = useState<BalanceResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const network =
     process.env.NEXT_PUBLIC_STELLAR_NETWORK === "mainnet" ? "public" : "testnet";
   const explorerUrl = `https://stellar.expert/explorer/${network}/account/${address}`;
 
+  async function refresh() {
+    setLoading(true);
+    try {
+      const res = await authed("/api/wallet/balance", { method: "GET" });
+      const data = (await res.json()) as BalanceResponse;
+      setBalance(data);
+    } catch {
+      setBalance({ state: "error", message: "Network error" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    refresh();
+    // Poll every 20s so the balance ticks up live when a milestone is
+    // approved in another tab/incognito while the freelancer watches.
+    const t = window.setInterval(refresh, 20_000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const usdc = balance?.usdc?.balance
+    ? Number(balance.usdc.balance).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 7,
+      })
+    : "0.00";
+  const xlm = balance?.xlm?.balance
+    ? Number(balance.xlm.balance).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })
+    : "0.00";
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Balance card */}
+      <div className="rounded-lg border border-border bg-bg p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-caption uppercase tracking-[0.16em] text-fg-subtle flex items-center gap-1.5">
+              <Wallet className="h-3 w-3" />
+              Available balance
+            </p>
+            <p className="mt-3 font-mono text-display-md text-fg tabular-nums leading-none">
+              ${usdc}
+              <span className="text-fg-subtle text-body-lg ml-2">USDC</span>
+            </p>
+            <p className="mt-3 font-mono text-mono-sm text-fg-subtle tabular-nums">
+              + {xlm} XLM (network fees)
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={loading}
+            className="inline-flex items-center gap-1.5 rounded border border-border hover:border-border-strong px-2.5 py-1.5 text-caption uppercase tracking-[0.14em] text-fg-muted hover:text-fg transition-colors disabled:opacity-50"
+            aria-label="Refresh balance"
+          >
+            {loading ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <RefreshCcw className="h-3 w-3" />
+            )}
+            {loading ? "Loading" : "Refresh"}
+          </button>
+        </div>
+        {balance?.state === "not_activated" ? (
+          <p className="mt-4 text-body-sm text-warning">
+            Wallet not yet active on-chain — sign in once more to trigger Friendbot funding.
+          </p>
+        ) : null}
+        {balance?.state === "ok" && balance.usdc && !balance.usdc.trustline ? (
+          <p className="mt-4 text-body-sm text-warning">
+            USDC trustline missing. Re-provision from Diagnostics → Re-provision wallet.
+          </p>
+        ) : null}
+        {balance?.state === "error" ? (
+          <p className="mt-4 text-body-sm text-danger">
+            Couldn&apos;t reach Horizon: {balance.message ?? "unknown error"}
+          </p>
+        ) : null}
+        {balance?.fetched_at ? (
+          <p className="mt-4 font-mono text-mono-sm text-fg-subtle">
+            Updated {new Date(balance.fetched_at).toLocaleTimeString()}
+          </p>
+        ) : null}
+      </div>
+
+      {/* Address */}
       <div className="flex items-center gap-2 rounded border border-border bg-bg p-3">
         <code className="flex-1 min-w-0 font-mono text-mono-sm text-fg break-all">
           {address}
