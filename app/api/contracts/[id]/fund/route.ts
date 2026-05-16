@@ -327,7 +327,13 @@ async function onChainFund({ contract, user, db }: OnChainArgs) {
   try {
     const result = await tw.initializeEscrow({
       signer: clientWallet.address,
-      engagementId: contract.short_id,
+      // TW reserves engagementId server-side at init, even before broadcast.
+      // If a previous attempt succeeded at init but failed at broadcast (or
+      // anywhere downstream), the short_id is now "burned" on TW's side and
+      // retrying with the same value returns "validation failed: engagementId
+      // already exists". Suffix with a per-attempt random so every init is
+      // structurally unique while still being traceable to the contract.
+      engagementId: `${contract.short_id}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
       title: contract.title,
       description: contract.description ?? `Sunvasi contract ${contract.short_id}`,
       platformFee: 0,
