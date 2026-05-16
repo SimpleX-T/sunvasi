@@ -7,6 +7,8 @@ import {
   ArrowRight,
   ArrowUpRight,
   CheckCircle2,
+  Circle,
+  CircleDashed,
   ExternalLink,
   FileText,
   Gavel,
@@ -286,6 +288,250 @@ function SettlementVisual() {
   );
 }
 
+function ProblemVisual() {
+  return (
+    <div className="w-full grid lg:grid-cols-[1fr_0.9fr] gap-8">
+      <article className="rounded-lg border border-border bg-bg-elevated p-8">
+        <p className="font-mono text-mono-sm uppercase tracking-[0.16em] text-fg-subtle">
+          Lagos, March 2026
+        </p>
+        <blockquote className="mt-6 font-display text-display-lg text-fg tracking-[-0.02em] leading-[1.1]">
+          &ldquo;Last month, I waited 18 days for a wire from Berlin. The Naira
+          had moved 6%.&rdquo;
+        </blockquote>
+        <cite className="not-italic mt-4 block font-mono text-mono-sm text-fg-subtle uppercase tracking-[0.16em]">
+          — Anonymous freelance developer
+        </cite>
+      </article>
+      <ul className="space-y-3">
+        {[
+          { stat: "18 days", note: "Average wire from EU/US to Nigeria" },
+          { stat: "5–10%", note: "Lost to FX + correspondent banking" },
+          { stat: "15%", note: "Upwork's cut + frozen accounts" },
+          { stat: "6%", note: "Naira movement in a single month" },
+        ].map((row) => (
+          <li
+            key={row.stat}
+            className="rounded border border-border bg-bg-elevated p-4 flex items-baseline justify-between gap-4"
+          >
+            <span className="font-display text-display-md text-fg tracking-[-0.02em]">
+              {row.stat}
+            </span>
+            <span className="text-body-sm text-fg-muted text-right max-w-[28ch]">
+              {row.note}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function SolutionVisual() {
+  const pillars = [
+    {
+      title: "Non-custodial escrow",
+      note: "USDC held by a Stellar smart contract via Trustless Work. Sunvasi never touches the funds.",
+    },
+    {
+      title: "Per-milestone release",
+      note: "Client commits per milestone, not the whole contract. Freelancer paid in ~5 seconds on Stellar.",
+    },
+    {
+      title: "Email-only UX",
+      note: "Privy embedded wallets behind email auth. The client never sees the word 'wallet'.",
+    },
+    {
+      title: "AI arbitration",
+      note: "Llama 3.3 reads the contract + evidence and splits funds. Tool calls and rules are public.",
+    },
+  ];
+  return (
+    <div className="w-full grid grid-cols-2 gap-3">
+      {pillars.map((p, i) => (
+        <motion.div
+          key={p.title}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: i * 0.08, duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
+          className="rounded-lg border border-border bg-bg-elevated p-5"
+        >
+          <p className="font-display text-display-sm text-fg tracking-tight">
+            {p.title}
+          </p>
+          <p className="mt-2 text-body-sm text-fg-muted leading-[1.55]">
+            {p.note}
+          </p>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function StackVisual() {
+  const categories = [
+    {
+      label: "Frontend",
+      items: ["Next.js 15", "React 19", "Tailwind 3.4", "Framer Motion 11"],
+    },
+    {
+      label: "Auth & wallets",
+      items: ["Privy (email + embedded Stellar wallet)", "App-owned wallet model"],
+    },
+    {
+      label: "Escrow",
+      items: [
+        "Trustless Work (multi-release)",
+        "Stellar / Soroban smart contracts",
+        "USDC asset (testnet)",
+      ],
+    },
+    {
+      label: "AI arbitration",
+      items: ["Llama 3.3 70B via Hugging Face Inference", "Gemini 3 Pro fallback", "Streaming SSE"],
+    },
+    {
+      label: "Data + storage",
+      items: ["Supabase (Postgres + RLS)", "Cloudinary (deliverable uploads)"],
+    },
+    {
+      label: "Email",
+      items: ["Resend (transactional invites)"],
+    },
+  ];
+  return (
+    <div className="w-full grid lg:grid-cols-2 gap-3">
+      {categories.map((cat) => (
+        <div
+          key={cat.label}
+          className="rounded-lg border border-border bg-bg-elevated p-5"
+        >
+          <p className="font-mono text-mono-sm uppercase tracking-[0.16em] text-fg-subtle">
+            {cat.label}
+          </p>
+          <ul className="mt-3 space-y-1.5">
+            {cat.items.map((item) => (
+              <li
+                key={item}
+                className="flex items-center gap-2 text-body-sm text-fg"
+              >
+                <span className="h-1 w-1 rounded-full bg-accent shrink-0" />
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MvpStatusVisual() {
+  type Status = "shipped" | "partial" | "next";
+  const rows: Array<{ status: Status; label: string; note: string }> = [
+    { status: "shipped", label: "Email sign-in + onboarding", note: "Privy email auth, role/skills picker, profile sync" },
+    { status: "shipped", label: "Contract create / edit / delete / share", note: "4-step stepper, restricted-access invitees, Resend invite emails" },
+    { status: "shipped", label: "Public funding page", note: "Role-aware: client funds, invitees view-only" },
+    { status: "shipped", label: "Real on-chain escrow", note: "TW init + per-milestone fund + approve + release, all Privy-signed" },
+    { status: "shipped", label: "AI arbitration", note: "Llama 3.3 (or Gemini), live SSE timeline, verdict signed on-chain" },
+    { status: "shipped", label: "Sponsored wallet activation", note: "Friendbot + auto USDC trustline, zero crypto friction" },
+    { status: "shipped", label: "Wallet balance + auto-release", note: "Live polling, server-side timer, 3-min demo mode" },
+    { status: "partial", label: "Cloudinary deliverable uploads", note: "Working; large-file UX could be smoother" },
+    { status: "partial", label: "Diagnostics + dry-runs", note: "/app/diagnostics — 7 integration checks + live TW dry-run" },
+    { status: "next", label: "Mainnet treasury sponsorship", note: "Requires a Sunvasi-owned Stellar wallet topping up new users" },
+    { status: "next", label: "Self-custody export to Freighter", note: "App-owned wallets → user-owned via Privy export endpoint" },
+    { status: "next", label: "Background auto-release worker", note: "Replace balance-poll trigger with a real cron / queue" },
+  ];
+  const ICON: Record<Status, typeof CheckCircle2> = {
+    shipped: CheckCircle2,
+    partial: CircleDashed,
+    next: Circle,
+  };
+  const TONE: Record<Status, string> = {
+    shipped: "text-success",
+    partial: "text-warning",
+    next: "text-fg-subtle",
+  };
+  return (
+    <div className="w-full rounded-lg border border-border bg-bg-elevated p-6 max-h-[60vh] overflow-y-auto">
+      <ul className="space-y-2">
+        {rows.map((r) => {
+          const Icon = ICON[r.status];
+          return (
+            <li
+              key={r.label}
+              className="grid grid-cols-[20px_1fr_auto] items-baseline gap-3 py-1.5"
+            >
+              <Icon className={cn("h-4 w-4 mt-0.5", TONE[r.status])} />
+              <div>
+                <p className="text-body text-fg">{r.label}</p>
+                <p className="text-body-sm text-fg-muted leading-[1.5]">{r.note}</p>
+              </div>
+              <span
+                className={cn(
+                  "font-mono text-mono-sm uppercase tracking-[0.14em]",
+                  TONE[r.status],
+                )}
+              >
+                {r.status === "shipped" ? "Live" : r.status === "partial" ? "Beta" : "Next"}
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function ClosingVisual() {
+  const links = [
+    {
+      href: "/",
+      title: "Open the landing page",
+      note: "The hero, the corridor, the arbitrator teaser",
+    },
+    {
+      href: "/app/contracts/DEMOH3LX/arbitration",
+      title: "Watch a live AI arbitration",
+      note: "The pre-seeded dispute, decided in <30 seconds",
+    },
+    {
+      href: "/arbitration",
+      title: "Read the arbitrator's constitution",
+      note: "Full system prompt + every tool the AI can call",
+    },
+    {
+      href: "/app/diagnostics",
+      title: "Run the diagnostics",
+      note: "7 integration checks + a live Trustless Work dry-run",
+    },
+  ];
+  return (
+    <div className="w-full space-y-2">
+      {links.map((l, i) => (
+        <motion.a
+          key={l.href}
+          href={l.href}
+          target={l.href.startsWith("http") ? "_blank" : undefined}
+          rel="noopener noreferrer"
+          initial={{ opacity: 0, x: -8 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: i * 0.08, duration: 0.5, ease: [0.32, 0.72, 0, 1] }}
+          className="group flex items-center gap-4 rounded-lg border border-border bg-bg-elevated p-5 hover:border-accent hover:bg-bg-subtle transition-colors duration-150 ease-sunvasi"
+        >
+          <div className="flex-1 min-w-0">
+            <p className="font-display text-display-sm text-fg tracking-tight group-hover:text-accent transition-colors">
+              {l.title}
+            </p>
+            <p className="mt-1 text-body-sm text-fg-muted">{l.note}</p>
+          </div>
+          <ArrowUpRight className="h-5 w-5 text-fg-subtle group-hover:text-accent transition-colors" />
+        </motion.a>
+      ))}
+    </div>
+  );
+}
+
 const SLIDES: Slide[] = [
   {
     ts: "0:00",
@@ -306,9 +552,50 @@ const SLIDES: Slide[] = [
     visual: <HeroVisual />,
   },
   {
-    ts: "0:15",
+    ts: "0:08",
+    durationMs: 14_000,
+    eyebrow: "02 — The problem",
+    title: (
+      <>
+        The corridor where trust is{" "}
+        <span className="text-fg-muted">most expensive.</span>
+      </>
+    ),
+    body: (
+      <p>
+        Nigerian freelancers earn in dollars but receive them through a banking
+        pipe that&apos;s slow, expensive, and freezes accounts on a whim. The
+        clients on the other side bounce on the first sign of crypto.
+      </p>
+    ),
+    cta: { label: "Read the manifesto", href: "/how-it-works" },
+    visual: <ProblemVisual />,
+  },
+  {
+    ts: "0:18",
+    durationMs: 14_000,
+    eyebrow: "03 — The solution",
+    title: (
+      <>
+        Stripe&apos;s UX, an escrow&apos;s teeth,{" "}
+        <span className="text-fg-muted">an AI&apos;s ruling.</span>
+      </>
+    ),
+    body: (
+      <p>
+        Sunvasi is the application layer over Trustless Work. We give the
+        freelancer a contract that funds itself and the client a checkout that
+        feels like Stripe — backed by Stellar escrow and an AI arbitrator when
+        people disagree.
+      </p>
+    ),
+    cta: { label: "See the architecture", href: "/how-it-works" },
+    visual: <SolutionVisual />,
+  },
+  {
+    ts: "0:32",
     durationMs: 12_000,
-    eyebrow: "02 — The contract",
+    eyebrow: "04 — The contract",
     title: (
       <>
         Compose it like an agreement,{" "}
@@ -326,9 +613,9 @@ const SLIDES: Slide[] = [
     visual: <StepperVisual />,
   },
   {
-    ts: "0:30",
+    ts: "0:44",
     durationMs: 12_000,
-    eyebrow: "03 — The funding",
+    eyebrow: "05 — The funding",
     title: (
       <>
         Client funds in <span className="text-accent">one click.</span>
@@ -345,9 +632,9 @@ const SLIDES: Slide[] = [
     visual: <FundingPageVisual />,
   },
   {
-    ts: "0:45",
+    ts: "0:56",
     durationMs: 25_000,
-    eyebrow: "04 — The money shot",
+    eyebrow: "06 — The money shot",
     title: (
       <>
         Watch an AI arbitrate <span className="text-fg-muted">in 60 seconds.</span>
@@ -367,9 +654,9 @@ const SLIDES: Slide[] = [
     visual: <ArbitrationVisual />,
   },
   {
-    ts: "1:10",
+    ts: "1:21",
     durationMs: 12_000,
-    eyebrow: "05 — On-chain settlement",
+    eyebrow: "07 — On-chain settlement",
     title: (
       <>
         And the funds <span className="text-accent">actually move.</span>
@@ -387,6 +674,65 @@ const SLIDES: Slide[] = [
       href: "https://viewer.trustlesswork.com/CC3VPB54NJ25KUFDLAULK7FGEZIOENMQYOBCEGUWO32ZA5YEGHDCG7VP",
     },
     visual: <SettlementVisual />,
+  },
+  {
+    ts: "1:33",
+    durationMs: 14_000,
+    eyebrow: "08 — Implementation",
+    title: (
+      <>
+        Boring tech, where it matters most.{" "}
+        <span className="text-fg-muted">Bleeding edge where it pays.</span>
+      </>
+    ),
+    body: (
+      <p>
+        Production-grade primitives (Next, Postgres, Supabase) for everything
+        except the things you came to see. Stellar + Soroban for non-custodial
+        money. Llama 3.3 for arbitration reasoning. Privy for invisible wallets.
+      </p>
+    ),
+    cta: { label: "Open diagnostics", href: "/app/diagnostics" },
+    visual: <StackVisual />,
+  },
+  {
+    ts: "1:47",
+    durationMs: 16_000,
+    eyebrow: "09 — Current MVP",
+    title: (
+      <>
+        Twelve features.{" "}
+        <span className="text-fg-muted">All of them already work.</span>
+      </>
+    ),
+    body: (
+      <p>
+        Every line in the green column is live on testnet right now and
+        signature-verified end-to-end. The yellow and grey rows are honest
+        about what&apos;s still on the runway — no demoware claims.
+      </p>
+    ),
+    cta: { label: "Run the diagnostics", href: "/app/diagnostics" },
+    visual: <MvpStatusVisual />,
+  },
+  {
+    ts: "2:03",
+    durationMs: 14_000,
+    eyebrow: "10 — Try it",
+    title: (
+      <>
+        Four ways in. <span className="text-fg-muted">Pick one.</span>
+      </>
+    ),
+    body: (
+      <p>
+        The whole product is live at the URLs below. The demo arbitration runs
+        in under a minute against a pre-seeded dispute; the diagnostics page
+        proves every external integration is wired and authentic.
+      </p>
+    ),
+    cta: { label: "Back to landing", href: "/" },
+    visual: <ClosingVisual />,
   },
 ];
 
